@@ -1,0 +1,25 @@
+# Claude
+.claude
+pondy-proposal*
+
+# Go
+pondy
+mock-actuator
+*.exe
+*.db
+*.csv
+
+# Node
+node_modules/
+web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Build artifacts
+cmd/pondy/web/dist/

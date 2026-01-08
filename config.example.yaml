@@ -1,0 +1,11 @@
+server:
+  port: 8080
+
+storage:
+  path: ./data/pondy.db
+
+targets:
+  - name: mock-service
+    type: actuator
+    endpoint: http://localhost:9090/actuator/metrics
+    interval: 10s
