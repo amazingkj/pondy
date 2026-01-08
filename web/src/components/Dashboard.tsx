@@ -2,39 +2,76 @@ import { useState } from 'react';
 import { useTargets } from '../hooks/useMetrics';
 import { TargetCard } from './TargetCard';
 import { Overview } from './Overview';
+import { useTheme } from '../context/ThemeContext';
 
 export type GlobalView = 'trend' | 'recs' | 'leaks' | null;
 
 export function Dashboard() {
   const { data, loading, error } = useTargets(5000);
   const [globalView, setGlobalView] = useState<GlobalView>(null);
+  const { theme, toggleTheme, colors } = useTheme();
 
   const handleGlobalToggle = (view: GlobalView) => {
     setGlobalView(globalView === view ? null : view);
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: colors.bg, transition: 'background-color 0.2s' }}>
       <header
         style={{
-          backgroundColor: '#fff',
-          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: colors.bgCard,
+          borderBottom: `1px solid ${colors.border}`,
           padding: '16px 24px',
+          transition: 'background-color 0.2s, border-color 0.2s',
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#111827' }}>
-            pondy
-          </h1>
-          <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#6b7280' }}>
-            Connection Pool Monitor
-          </p>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: colors.text }}>
+              pondy
+            </h1>
+            <p style={{ margin: '4px 0 0', fontSize: '14px', color: colors.textSecondary }}>
+              Connection Pool Monitor
+            </p>
+          </div>
+          <button
+            onClick={toggleTheme}
+            style={{
+              padding: '8px 12px',
+              border: `1px solid ${colors.border}`,
+              borderRadius: '8px',
+              backgroundColor: colors.bgSecondary,
+              color: colors.text,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+            }}
+          >
+            {theme === 'dark' ? (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="5"/>
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+                Light
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                Dark
+              </>
+            )}
+          </button>
         </div>
       </header>
 
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
         {loading && !data && (
-          <div style={{ textAlign: 'center', padding: '60px', color: '#6b7280' }}>
+          <div style={{ textAlign: 'center', padding: '60px', color: colors.textSecondary }}>
             Loading...
           </div>
         )}
@@ -53,7 +90,7 @@ export function Dashboard() {
         )}
 
         {data && data.targets.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '60px', color: '#6b7280' }}>
+          <div style={{ textAlign: 'center', padding: '60px', color: colors.textSecondary }}>
             No targets configured
           </div>
         )}
@@ -78,7 +115,7 @@ export function Dashboard() {
 
       <footer
         style={{
-          borderTop: '1px solid #e5e7eb',
+          borderTop: `1px solid ${colors.border}`,
           padding: '24px',
           marginTop: '40px',
         }}
@@ -95,12 +132,12 @@ export function Dashboard() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: 600, color: '#374151', fontSize: '14px' }}>pondy</span>
+            <span style={{ fontWeight: 600, color: colors.text, fontSize: '14px' }}>pondy</span>
             <span
               style={{
                 padding: '2px 8px',
-                backgroundColor: '#dbeafe',
-                color: '#1d4ed8',
+                backgroundColor: theme === 'dark' ? '#1e3a5f' : '#dbeafe',
+                color: theme === 'dark' ? '#60a5fa' : '#1d4ed8',
                 borderRadius: '9999px',
                 fontSize: '11px',
                 fontWeight: 500,
@@ -114,9 +151,9 @@ export function Dashboard() {
               href="https://github.com/amazingkj/pondy"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: '#6b7280', textDecoration: 'none' }}
-              onMouseOver={(e) => (e.currentTarget.style.color = '#374151')}
-              onMouseOut={(e) => (e.currentTarget.style.color = '#6b7280')}
+              style={{ color: colors.textSecondary, textDecoration: 'none' }}
+              onMouseOver={(e) => (e.currentTarget.style.color = colors.text)}
+              onMouseOut={(e) => (e.currentTarget.style.color = colors.textSecondary)}
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor">
@@ -129,9 +166,9 @@ export function Dashboard() {
               href="https://github.com/amazingkj/pondy/issues"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: '#6b7280', textDecoration: 'none' }}
-              onMouseOver={(e) => (e.currentTarget.style.color = '#374151')}
-              onMouseOut={(e) => (e.currentTarget.style.color = '#6b7280')}
+              style={{ color: colors.textSecondary, textDecoration: 'none' }}
+              onMouseOver={(e) => (e.currentTarget.style.color = colors.text)}
+              onMouseOut={(e) => (e.currentTarget.style.color = colors.textSecondary)}
             >
               Issues
             </a>
@@ -139,9 +176,9 @@ export function Dashboard() {
               href="https://github.com/amazingkj/pondy/wiki"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ color: '#6b7280', textDecoration: 'none' }}
-              onMouseOver={(e) => (e.currentTarget.style.color = '#374151')}
-              onMouseOut={(e) => (e.currentTarget.style.color = '#6b7280')}
+              style={{ color: colors.textSecondary, textDecoration: 'none' }}
+              onMouseOver={(e) => (e.currentTarget.style.color = colors.text)}
+              onMouseOut={(e) => (e.currentTarget.style.color = colors.textSecondary)}
             >
               Docs
             </a>

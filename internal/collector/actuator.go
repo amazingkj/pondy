@@ -11,9 +11,10 @@ import (
 
 // ActuatorCollector collects metrics from Spring Boot Actuator endpoints
 type ActuatorCollector struct {
-	name     string
-	endpoint string
-	client   *http.Client
+	name         string
+	instanceName string
+	endpoint     string
+	client       *http.Client
 }
 
 // ActuatorMetricResponse represents Spring Actuator metric response
@@ -33,10 +34,11 @@ type ActuatorTag struct {
 	Values []string `json:"values"`
 }
 
-func NewActuatorCollector(name, endpoint string) *ActuatorCollector {
+func NewActuatorCollector(name, instanceName, endpoint string) *ActuatorCollector {
 	return &ActuatorCollector{
-		name:     name,
-		endpoint: endpoint,
+		name:         name,
+		instanceName: instanceName,
+		endpoint:     endpoint,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -47,10 +49,15 @@ func (c *ActuatorCollector) Name() string {
 	return c.name
 }
 
+func (c *ActuatorCollector) InstanceName() string {
+	return c.instanceName
+}
+
 func (c *ActuatorCollector) Collect() (*models.PoolMetrics, error) {
 	metrics := &models.PoolMetrics{
-		TargetName: c.name,
-		Timestamp:  time.Now(),
+		TargetName:   c.name,
+		InstanceName: c.instanceName,
+		Timestamp:    time.Now(),
 	}
 
 	// Collect active connections

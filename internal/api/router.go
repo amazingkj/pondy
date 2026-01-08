@@ -20,11 +20,16 @@ func NewRouter(cfg *config.Config, store storage.Storage, webFS embed.FS) *gin.E
 	api := r.Group("/api")
 	{
 		api.GET("/targets", handler.GetTargets)
+		api.GET("/targets/:name/instances", handler.GetInstances)
 		api.GET("/targets/:name/metrics", handler.GetTargetMetrics)
 		api.GET("/targets/:name/history", handler.GetTargetHistory)
 		api.GET("/targets/:name/recommendations", handler.GetRecommendations)
 		api.GET("/targets/:name/leaks", handler.DetectLeaks)
 		api.GET("/targets/:name/export", handler.ExportCSV)
+		api.GET("/targets/:name/peaktime", handler.GetPeakTime)
+		api.GET("/targets/:name/anomalies", handler.DetectAnomalies)
+		api.GET("/targets/:name/compare", handler.ComparePeriods)
+		api.GET("/targets/:name/report", handler.GenerateReport)
 	}
 
 	// Health check

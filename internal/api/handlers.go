@@ -10,6 +10,7 @@ import (
 	"github.com/jiin/pondy/internal/analyzer"
 	"github.com/jiin/pondy/internal/config"
 	"github.com/jiin/pondy/internal/models"
+	"github.com/jiin/pondy/internal/report"
 	"github.com/jiin/pondy/internal/storage"
 )
 
@@ -39,17 +40,74 @@ func (h *Handler) GetTargets(c *gin.Context) {
 			Status: "unknown",
 		}
 
-		// Get latest metrics
-		metrics, err := h.store.GetLatest(t.Name)
-		if err == nil && metrics != nil {
-			status.Current = metrics
-			status.Status = h.determineStatus(metrics)
+		// Get all instances for this target
+		instanceMetrics, err := h.store.GetLatestAllInstances(t.Name)
+		if err == nil && len(instanceMetrics) > 0 {
+			// Build instance statuses
+			var instances []models.InstanceStatus
+			var totalActive, totalIdle, totalPending, totalMax int
+			worstStatus := "healthy"
+
+			for _, m := range instanceMetrics {
+				instStatus := h.determineStatus(&m)
+				instances = append(instances, models.InstanceStatus{
+					InstanceName: m.InstanceName,
+					Status:       instStatus,
+					Current:      &m,
+				})
+
+				totalActive += m.Active
+				totalIdle += m.Idle
+				totalPending += m.Pending
+				totalMax += m.Max
+
+				// Track worst status
+				if instStatus == "critical" || (instStatus == "warning" && worstStatus == "healthy") {
+					worstStatus = instStatus
+				}
+			}
+
+			status.Instances = instances
+			status.Status = worstStatus
+
+			// Set aggregated current metrics (for backward compatibility)
+			if len(instanceMetrics) == 1 {
+				status.Current = &instanceMetrics[0]
+			} else {
+				status.Current = &models.PoolMetrics{
+					TargetName:   t.Name,
+					InstanceName: "aggregated",
+					Active:       totalActive,
+					Idle:         totalIdle,
+					Pending:      totalPending,
+					Max:          totalMax,
+				}
+			}
+		} else {
+			// Fallback to old behavior
+			metrics, err := h.store.GetLatest(t.Name)
+			if err == nil && metrics != nil {
+				status.Current = metrics
+				status.Status = h.determineStatus(metrics)
+			}
 		}
 
 		targets = append(targets, status)
 	}
 
 	c.JSON(http.StatusOK, TargetsResponse{Targets: targets})
+}
+
+func (h *Handler) GetInstances(c *gin.Context) {
+	name := c.Param("name")
+
+	instances, err := h.store.GetInstances(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"target_name": name, "instances": instances})
 }
 
 func (h *Handler) GetTargetMetrics(c *gin.Context) {
@@ -71,6 +129,7 @@ func (h *Handler) GetTargetMetrics(c *gin.Context) {
 
 func (h *Handler) GetTargetHistory(c *gin.Context) {
 	name := c.Param("name")
+	instance := c.Query("instance")
 	rangeParam := c.DefaultQuery("range", "1h")
 
 	duration, err := time.ParseDuration(rangeParam)
@@ -81,7 +140,13 @@ func (h *Handler) GetTargetHistory(c *gin.Context) {
 	to := time.Now()
 	from := to.Add(-duration)
 
-	datapoints, err := h.store.GetHistory(name, from, to)
+	var datapoints []models.PoolMetrics
+	if instance != "" {
+		datapoints, err = h.store.GetHistoryByInstance(name, instance, from, to)
+	} else {
+		datapoints, err = h.store.GetHistory(name, from, to)
+	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -189,6 +254,104 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 	}
 }
 
+func (h *Handler) GetPeakTime(c *gin.Context) {
+	name := c.Param("name")
+	rangeParam := c.DefaultQuery("range", "24h")
+
+	duration, err := time.ParseDuration(rangeParam)
+	if err != nil {
+		duration = 24 * time.Hour
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	datapoints, err := h.store.GetHistory(name, from, to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(datapoints) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no data available for analysis"})
+		return
+	}
+
+	result := analyzer.AnalyzePeakTime(name, datapoints)
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) DetectAnomalies(c *gin.Context) {
+	name := c.Param("name")
+	rangeParam := c.DefaultQuery("range", "24h")
+
+	duration, err := time.ParseDuration(rangeParam)
+	if err != nil {
+		duration = 24 * time.Hour
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	datapoints, err := h.store.GetHistory(name, from, to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(datapoints) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no data available for analysis"})
+		return
+	}
+
+	result := analyzer.DetectAnomalies(name, datapoints)
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) ComparePeriods(c *gin.Context) {
+	name := c.Param("name")
+	period := c.DefaultQuery("period", "day") // "day" or "week"
+
+	var duration time.Duration
+	switch period {
+	case "week":
+		duration = 7 * 24 * time.Hour
+	default:
+		duration = 24 * time.Hour
+		period = "day"
+	}
+
+	now := time.Now()
+
+	// Current period
+	currentTo := now
+	currentFrom := now.Add(-duration)
+
+	// Previous period
+	previousTo := currentFrom
+	previousFrom := previousTo.Add(-duration)
+
+	currentMetrics, err := h.store.GetHistory(name, currentFrom, currentTo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	previousMetrics, err := h.store.GetHistory(name, previousFrom, previousTo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(currentMetrics) == 0 && len(previousMetrics) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no data available for comparison"})
+		return
+	}
+
+	result := analyzer.ComparePeriods(name, currentMetrics, previousMetrics, period)
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *Handler) determineStatus(m *models.PoolMetrics) string {
 	if m.Max == 0 {
 		return "unknown"
@@ -205,4 +368,48 @@ func (h *Handler) determineStatus(m *models.PoolMetrics) string {
 		return "warning"
 	}
 	return "healthy"
+}
+
+func (h *Handler) GenerateReport(c *gin.Context) {
+	name := c.Param("name")
+	rangeParam := c.DefaultQuery("range", "24h")
+
+	duration, err := time.ParseDuration(rangeParam)
+	if err != nil {
+		duration = 24 * time.Hour
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	// Gather all data
+	datapoints, err := h.store.GetHistory(name, from, to)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(datapoints) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no data available for report"})
+		return
+	}
+
+	// Run analysis
+	recs := analyzer.Analyze(datapoints)
+	leaks := analyzer.DetectLeaks(datapoints)
+	anomalies := analyzer.DetectAnomalies(name, datapoints)
+	peakTime := analyzer.AnalyzePeakTime(name, datapoints)
+
+	// Build report data
+	reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime)
+
+	// Generate HTML report
+	htmlBytes, err := report.GenerateHTMLReport(reportData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Data(http.StatusOK, "text/html", htmlBytes)
 }

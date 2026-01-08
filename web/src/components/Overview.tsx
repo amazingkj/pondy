@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useTargets, exportCSV } from '../hooks/useMetrics';
 import type { GlobalView } from './Dashboard';
+import { ComparisonChart } from './ComparisonChart';
+import { useTheme } from '../context/ThemeContext';
 
 const statusColors: Record<string, string> = {
   healthy: '#22c55e',
@@ -15,6 +18,9 @@ interface OverviewProps {
 
 export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
   const { data } = useTargets(5000);
+  const [showComparisonChart, setShowComparisonChart] = useState(false);
+  const [comparisonRange, setComparisonRange] = useState('1h');
+  const { theme, colors } = useTheme();
 
   if (!data || data.targets.length === 0) {
     return null;
@@ -41,14 +47,15 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
   return (
     <div
       style={{
-        backgroundColor: '#fff',
+        backgroundColor: colors.bgCard,
         borderRadius: '12px',
         padding: '20px',
         marginBottom: '24px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        boxShadow: theme === 'dark' ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
+        transition: 'background-color 0.2s',
       }}
     >
-      <h2 style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600, color: '#374151' }}>
+      <h2 style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600, color: colors.text }}>
         Overview
       </h2>
 
@@ -65,7 +72,7 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
           color={avgUsage > 80 ? '#ef4444' : avgUsage > 60 ? '#f59e0b' : '#22c55e'}
         />
         <div>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>Status</div>
+          <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '8px' }}>Status</div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {Object.entries(statusCounts).map(([status, count]) => (
               <span
@@ -75,6 +82,7 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
                   alignItems: 'center',
                   gap: '4px',
                   fontSize: '13px',
+                  color: colors.text,
                 }}
               >
                 <span
@@ -92,8 +100,8 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
         </div>
       </div>
 
-      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
-        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>All Targets</div>
+      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '8px' }}>All Targets</div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <ActionButton active={globalView === 'trend'} onClick={() => onGlobalToggle('trend')}>
             All Trends
@@ -112,8 +120,13 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
 
       {data.targets.length > 1 && (
         <div style={{ marginTop: '20px' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-            Comparison
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ fontSize: '12px', color: colors.textSecondary }}>
+              Comparison
+            </div>
+            <ActionButton active={showComparisonChart} onClick={() => setShowComparisonChart(!showComparisonChart)}>
+              {showComparisonChart ? 'Hide Chart' : 'Show Chart'}
+            </ActionButton>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {data.targets.map((t) => {
@@ -126,24 +139,50 @@ export function Overview({ globalView, onGlobalToggle }: OverviewProps) {
                   style={{
                     flex: '1 1 120px',
                     padding: '12px',
-                    backgroundColor: '#f9fafb',
+                    backgroundColor: colors.bgSecondary,
                     borderRadius: '8px',
                     borderLeft: `4px solid ${statusColors[t.status]}`,
                   }}
                 >
-                  <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: colors.text }}>
                     {t.name}
                   </div>
-                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#374151' }}>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: colors.text }}>
                     {usage.toFixed(0)}%
                   </div>
-                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                  <div style={{ fontSize: '11px', color: colors.textSecondary }}>
                     {t.current?.active || 0} / {t.current?.max || 0}
                   </div>
                 </div>
               );
             })}
           </div>
+          {showComparisonChart && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ marginBottom: '12px' }}>
+                {['1h', '6h', '24h'].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setComparisonRange(r)}
+                    style={{
+                      marginRight: '8px',
+                      padding: '4px 12px',
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '4px',
+                      backgroundColor: comparisonRange === r ? '#3b82f6' : colors.bgCard,
+                      color: comparisonRange === r ? '#fff' : colors.text,
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <ComparisonChart targetNames={data.targets.map(t => t.name)} range={comparisonRange} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -161,13 +200,14 @@ function StatCard({
   subtext?: string;
   color?: string;
 }) {
+  const { colors } = useTheme();
   return (
     <div>
-      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>{label}</div>
-      <div style={{ fontSize: '24px', fontWeight: 'bold', color: color || '#374151' }}>
+      <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>{label}</div>
+      <div style={{ fontSize: '24px', fontWeight: 'bold', color: color || colors.text }}>
         {value}
         {subtext && (
-          <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#6b7280' }}>
+          <span style={{ fontSize: '12px', fontWeight: 'normal', color: colors.textSecondary }}>
             {' '}{subtext}
           </span>
         )}
@@ -185,15 +225,16 @@ function ActionButton({
   onClick: () => void;
   active?: boolean;
 }) {
+  const { colors } = useTheme();
   return (
     <button
       onClick={onClick}
       style={{
         padding: '8px 16px',
-        border: '1px solid #e5e7eb',
+        border: `1px solid ${colors.border}`,
         borderRadius: '6px',
-        backgroundColor: active ? '#3b82f6' : '#fff',
-        color: active ? '#fff' : '#374151',
+        backgroundColor: active ? '#3b82f6' : colors.bgCard,
+        color: active ? '#fff' : colors.text,
         cursor: 'pointer',
         fontSize: '13px',
         fontWeight: 500,

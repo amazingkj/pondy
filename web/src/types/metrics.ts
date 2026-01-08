@@ -1,6 +1,7 @@
 export interface PoolMetrics {
   id: number;
   target_name: string;
+  instance_name: string;
   active: number;
   idle: number;
   pending: number;
@@ -10,10 +11,17 @@ export interface PoolMetrics {
   timestamp: string;
 }
 
+export interface InstanceStatus {
+  instance_name: string;
+  status: 'healthy' | 'warning' | 'critical' | 'unknown';
+  current?: PoolMetrics;
+}
+
 export interface TargetStatus {
   name: string;
   status: 'healthy' | 'warning' | 'critical' | 'unknown';
   current?: PoolMetrics;
+  instances?: InstanceStatus[];
 }
 
 export interface TargetsResponse {

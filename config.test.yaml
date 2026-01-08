@@ -4,6 +4,10 @@ server:
 storage:
   path: ./data/pondy.db
 
+retention:
+  max_age: 30d
+  cleanup_interval: 1h
+
 targets:
   - name: mock-service
     type: actuator
