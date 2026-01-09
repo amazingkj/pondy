@@ -1,19 +1,48 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTargets } from '../hooks/useMetrics';
 import { TargetCard } from './TargetCard';
 import { Overview } from './Overview';
 import { useTheme } from '../context/ThemeContext';
 
-export type GlobalView = 'trend' | 'recs' | 'leaks' | null;
+export type GlobalView = 'trend' | 'recs' | 'leaks' | 'peakTime' | 'anomalies' | 'heatmap' | null;
 
 export function Dashboard() {
   const { data, loading, error } = useTargets(5000);
   const [globalView, setGlobalView] = useState<GlobalView>(null);
+  const [targetOrder, setTargetOrder] = useState<string[]>([]);
   const { theme, toggleTheme, colors } = useTheme();
+
+  // Initialize target order when data loads
+  useEffect(() => {
+    if (data?.targets && targetOrder.length === 0) {
+      setTargetOrder(data.targets.map(t => t.name));
+    }
+  }, [data?.targets, targetOrder.length]);
+
+  // Merge new targets into the existing order
+  useEffect(() => {
+    if (data?.targets) {
+      const currentNames = data.targets.map(t => t.name);
+      const existingInOrder = targetOrder.filter(name => currentNames.includes(name));
+      const newTargets = currentNames.filter(name => !targetOrder.includes(name));
+      if (newTargets.length > 0 || existingInOrder.length !== targetOrder.length) {
+        setTargetOrder([...existingInOrder, ...newTargets]);
+      }
+    }
+  }, [data?.targets, targetOrder]);
 
   const handleGlobalToggle = (view: GlobalView) => {
     setGlobalView(globalView === view ? null : view);
   };
+
+  // Get ordered targets
+  const orderedTargets = useMemo(() => {
+    if (!data?.targets) return [];
+    const targetMap = new Map(data.targets.map(t => [t.name, t]));
+    return targetOrder
+      .filter(name => targetMap.has(name))
+      .map(name => targetMap.get(name)!);
+  }, [data?.targets, targetOrder]);
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: colors.bg, transition: 'background-color 0.2s' }}>
@@ -21,11 +50,11 @@ export function Dashboard() {
         style={{
           backgroundColor: colors.bgCard,
           borderBottom: `1px solid ${colors.border}`,
-          padding: '16px 24px',
+          padding: '12px 16px',
           transition: 'background-color 0.2s, border-color 0.2s',
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: colors.text }}>
               pondy
@@ -69,7 +98,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+      <main style={{ padding: '16px' }}>
         {loading && !data && (
           <div style={{ textAlign: 'center', padding: '60px', color: colors.textSecondary }}>
             Loading...
@@ -97,15 +126,20 @@ export function Dashboard() {
 
         {data && data.targets.length > 0 && (
           <>
-            <Overview globalView={globalView} onGlobalToggle={handleGlobalToggle} />
+            <Overview
+              globalView={globalView}
+              onGlobalToggle={handleGlobalToggle}
+              targetOrder={targetOrder}
+              onTargetOrderChange={setTargetOrder}
+            />
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-                gap: '24px',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(max(280px, calc((100% - 32px) / 3)), 1fr))',
+                gap: '16px',
               }}
             >
-              {data.targets.map((target) => (
+              {orderedTargets.map((target) => (
                 <TargetCard key={target.name} target={target} globalView={globalView} />
               ))}
             </div>
@@ -116,19 +150,17 @@ export function Dashboard() {
       <footer
         style={{
           borderTop: `1px solid ${colors.border}`,
-          padding: '24px',
-          marginTop: '40px',
+          padding: '12px 16px',
+          marginTop: '16px',
         }}
       >
         <div
           style={{
-            maxWidth: '1200px',
-            margin: '0 auto',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '16px',
+            gap: '12px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

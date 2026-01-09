@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,10 +23,19 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// Add WAL mode, busy timeout, and performance optimizations
+	dsn := dbPath + "?_pragma=busy_timeout(5000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=cache_size(-64000)" +
+		"&_pragma=temp_store(MEMORY)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+
+	// Limit to single connection to avoid lock contention
+	db.SetMaxOpenConns(1)
 
 	storage := &SQLiteStorage{db: db}
 	if err := storage.migrate(); err != nil {
@@ -37,77 +47,112 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 }
 
 func (s *SQLiteStorage) migrate() error {
-	// Create table with instance_name column
+	// Create table with all columns
 	query := `
 	CREATE TABLE IF NOT EXISTS pool_metrics (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		target_name TEXT NOT NULL,
 		instance_name TEXT NOT NULL DEFAULT 'default',
-		active INTEGER NOT NULL,
-		idle INTEGER NOT NULL,
-		pending INTEGER NOT NULL,
-		max INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'healthy',
+		active INTEGER NOT NULL DEFAULT 0,
+		idle INTEGER NOT NULL DEFAULT 0,
+		pending INTEGER NOT NULL DEFAULT 0,
+		max INTEGER NOT NULL DEFAULT 0,
 		timeout INTEGER DEFAULT 0,
 		acquire_p99 REAL DEFAULT 0,
+		heap_used INTEGER DEFAULT 0,
+		heap_max INTEGER DEFAULT 0,
+		non_heap_used INTEGER DEFAULT 0,
+		threads_live INTEGER DEFAULT 0,
+		cpu_usage REAL DEFAULT 0,
 		timestamp DATETIME NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_metrics_target_instance_time
 	ON pool_metrics(target_name, instance_name, timestamp DESC);
+
+	CREATE INDEX IF NOT EXISTS idx_metrics_timestamp
+	ON pool_metrics(timestamp DESC);
+
+	CREATE INDEX IF NOT EXISTS idx_metrics_target_time
+	ON pool_metrics(target_name, timestamp DESC);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
 	}
 
-	// Migration: add instance_name column if it doesn't exist
+	// Migration: add columns if they don't exist
 	s.runMigration()
 
 	return nil
 }
 
 func (s *SQLiteStorage) runMigration() {
-	// Check if instance_name column exists
-	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pool_metrics') WHERE name='instance_name'`).Scan(&count)
-	if err != nil || count > 0 {
-		return // Column exists or error checking
+	// List of columns to add if they don't exist
+	columns := []struct {
+		name string
+		def  string
+	}{
+		{"instance_name", "TEXT NOT NULL DEFAULT 'default'"},
+		{"status", "TEXT NOT NULL DEFAULT 'healthy'"},
+		{"heap_used", "INTEGER DEFAULT 0"},
+		{"heap_max", "INTEGER DEFAULT 0"},
+		{"non_heap_used", "INTEGER DEFAULT 0"},
+		{"threads_live", "INTEGER DEFAULT 0"},
+		{"cpu_usage", "REAL DEFAULT 0"},
 	}
 
-	// Add column
-	_, err = s.db.Exec(`ALTER TABLE pool_metrics ADD COLUMN instance_name TEXT NOT NULL DEFAULT 'default'`)
-	if err != nil {
-		log.Printf("Migration warning (may already exist): %v", err)
-	} else {
-		log.Println("Migration: added instance_name column")
+	for _, col := range columns {
+		var count int
+		err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pool_metrics') WHERE name=?`, col.name).Scan(&count)
+		if err == nil && count == 0 {
+			_, err = s.db.Exec(fmt.Sprintf(`ALTER TABLE pool_metrics ADD COLUMN %s %s`, col.name, col.def))
+			if err != nil {
+				log.Printf("Migration warning: %v", err)
+			} else {
+				log.Printf("Migration: added %s column", col.name)
+			}
+		}
 	}
 
-	// Create new index
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_metrics_target_instance_time ON pool_metrics(target_name, instance_name, timestamp DESC)`)
+	// Create index
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_metrics_target_instance_time ON pool_metrics(target_name, instance_name, timestamp DESC)`)
 	if err != nil {
 		log.Printf("Migration warning: %v", err)
 	}
 }
 
 func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
-	// Default instance name if empty
+	// Default values
 	instanceName := metrics.InstanceName
 	if instanceName == "" {
 		instanceName = "default"
 	}
+	status := metrics.Status
+	if status == "" {
+		status = models.StatusHealthy
+	}
 
 	query := `
-	INSERT INTO pool_metrics (target_name, instance_name, active, idle, pending, max, timeout, acquire_p99, timestamp)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO pool_metrics (target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query,
 		metrics.TargetName,
 		instanceName,
+		status,
 		metrics.Active,
 		metrics.Idle,
 		metrics.Pending,
 		metrics.Max,
 		metrics.Timeout,
 		metrics.AcquireP99,
+		metrics.HeapUsed,
+		metrics.HeapMax,
+		metrics.NonHeapUsed,
+		metrics.ThreadsLive,
+		metrics.CpuUsage,
 		metrics.Timestamp,
 	)
 	if err != nil {
@@ -123,7 +168,8 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 
 func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error) {
 	query := `
-	SELECT id, target_name, instance_name, active, idle, pending, max, timeout, acquire_p99, timestamp
+	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
 	FROM pool_metrics
 	WHERE target_name = ?
 	ORDER BY timestamp DESC
@@ -132,7 +178,8 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 	row := s.db.QueryRow(query, targetName)
 
 	var m models.PoolMetrics
-	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99, &m.Timestamp)
+	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -144,7 +191,8 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 
 func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*models.PoolMetrics, error) {
 	query := `
-	SELECT id, target_name, instance_name, active, idle, pending, max, timeout, acquire_p99, timestamp
+	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ?
 	ORDER BY timestamp DESC
@@ -153,7 +201,8 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 	row := s.db.QueryRow(query, targetName, instanceName)
 
 	var m models.PoolMetrics
-	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99, &m.Timestamp)
+	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -165,7 +214,8 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 
 func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolMetrics, error) {
 	query := `
-	SELECT p.id, p.target_name, p.instance_name, p.active, p.idle, p.pending, p.max, p.timeout, p.acquire_p99, p.timestamp
+	SELECT p.id, p.target_name, p.instance_name, p.status, p.active, p.idle, p.pending, p.max, p.timeout, p.acquire_p99,
+		p.heap_used, p.heap_max, p.non_heap_used, p.threads_live, p.cpu_usage, p.timestamp
 	FROM pool_metrics p
 	INNER JOIN (
 		SELECT instance_name, MAX(timestamp) as max_ts
@@ -185,7 +235,8 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 	var results []models.PoolMetrics
 	for rows.Next() {
 		var m models.PoolMetrics
-		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -195,7 +246,8 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 
 func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
-	SELECT id, target_name, instance_name, active, idle, pending, max, timeout, acquire_p99, timestamp
+	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -209,7 +261,8 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 	var results []models.PoolMetrics
 	for rows.Next() {
 		var m models.PoolMetrics
-		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -219,7 +272,8 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 
 func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
-	SELECT id, target_name, instance_name, active, idle, pending, max, timeout, acquire_p99, timestamp
+	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -233,7 +287,8 @@ func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, fr
 	var results []models.PoolMetrics
 	for rows.Next() {
 		var m models.PoolMetrics
-		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)

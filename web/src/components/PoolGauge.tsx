@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 interface PoolGaugeProps {
@@ -6,18 +7,18 @@ interface PoolGaugeProps {
   size?: number;
 }
 
-export function PoolGauge({ active, max, size = 120 }: PoolGaugeProps) {
+export const PoolGauge = memo(function PoolGauge({ active, max, size = 120 }: PoolGaugeProps) {
   const usage = max > 0 ? (active / max) * 100 : 0;
-  const data = [
+  const data = useMemo(() => [
     { name: 'Used', value: active },
     { name: 'Available', value: Math.max(0, max - active) },
-  ];
+  ], [active, max]);
 
-  const getColor = () => {
+  const color = useMemo(() => {
     if (usage >= 90) return '#ef4444';
     if (usage >= 70) return '#f59e0b';
     return '#22c55e';
-  };
+  }, [usage]);
 
   return (
     <div style={{ width: size, height: size, position: 'relative' }}>
@@ -33,7 +34,7 @@ export function PoolGauge({ active, max, size = 120 }: PoolGaugeProps) {
             endAngle={0}
             dataKey="value"
           >
-            <Cell fill={getColor()} />
+            <Cell fill={color} />
             <Cell fill="#e5e7eb" />
           </Pie>
         </PieChart>
@@ -47,7 +48,7 @@ export function PoolGauge({ active, max, size = 120 }: PoolGaugeProps) {
           textAlign: 'center',
         }}
       >
-        <div style={{ fontSize: size * 0.2, fontWeight: 'bold', color: getColor() }}>
+        <div style={{ fontSize: size * 0.2, fontWeight: 'bold', color: color }}>
           {usage.toFixed(0)}%
         </div>
         <div style={{ fontSize: size * 0.1, color: '#6b7280' }}>
@@ -56,4 +57,4 @@ export function PoolGauge({ active, max, size = 120 }: PoolGaugeProps) {
       </div>
     </div>
   );
-}
+});

@@ -1,12 +1,37 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { PoolMetrics } from '../types/metrics';
+import { useSettings } from '../hooks/useMetrics';
 
 interface HeatmapChartProps {
   data: PoolMetrics[];
   maxValue?: number;
 }
 
-export function HeatmapChart({ data, maxValue: propMaxValue }: HeatmapChartProps) {
+// Helper function to get hour in specified timezone
+function getHourInTimezone(timestamp: string, timezone: string): number {
+  const date = new Date(timestamp);
+
+  if (timezone === 'Local' || timezone === '') {
+    return date.getHours();
+  }
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      hour12: false,
+      timeZone: timezone === 'UTC' ? 'UTC' : timezone,
+    });
+    const hour = parseInt(formatter.format(date), 10);
+    return hour === 24 ? 0 : hour;
+  } catch {
+    return date.getHours();
+  }
+}
+
+export const HeatmapChart = memo(function HeatmapChart({ data, maxValue: propMaxValue }: HeatmapChartProps) {
+  const { settings } = useSettings();
+  const timezone = settings?.timezone || 'Local';
+
   const { heatmapData, maxValue } = useMemo(() => {
     // Group data by hour (0-23) and calculate average usage
     const hourlyData: { [hour: number]: { total: number; count: number; max: number } } = {};
@@ -16,7 +41,7 @@ export function HeatmapChart({ data, maxValue: propMaxValue }: HeatmapChartProps
     }
 
     data.forEach((d) => {
-      const hour = new Date(d.timestamp).getHours();
+      const hour = getHourInTimezone(d.timestamp, timezone);
       const usage = d.max > 0 ? (d.active / d.max) * 100 : 0;
       hourlyData[hour].total += usage;
       hourlyData[hour].count += 1;
@@ -33,7 +58,7 @@ export function HeatmapChart({ data, maxValue: propMaxValue }: HeatmapChartProps
     const max = propMaxValue ?? Math.max(...result.map((r) => r.avgUsage), 1);
 
     return { heatmapData: result, maxValue: max };
-  }, [data, propMaxValue]);
+  }, [data, propMaxValue, timezone]);
 
   const getColor = (value: number) => {
     const intensity = Math.min(value / maxValue, 1);
@@ -99,4 +124,4 @@ export function HeatmapChart({ data, maxValue: propMaxValue }: HeatmapChartProps
       </div>
     </div>
   );
-}
+});

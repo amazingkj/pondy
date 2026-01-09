@@ -4,6 +4,10 @@ server:
 storage:
   path: ./data/pondy.db
 
+# Timezone for chart display (default: Local)
+# Examples: "Asia/Seoul", "Asia/Tokyo", "UTC", "Local"
+timezone: Asia/Seoul
+
 targets:
   - name: mock-service
     type: actuator

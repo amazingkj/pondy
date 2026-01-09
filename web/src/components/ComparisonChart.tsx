@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -9,10 +9,15 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { useTheme } from '../context/ThemeContext';
+import { useSettings, formatTime } from '../hooks/useMetrics';
+
+type MetricType = 'usage' | 'cpu' | 'heap' | 'threads';
 
 interface ComparisonChartProps {
   targetNames: string[];
   range?: string;
+  metric?: MetricType;
 }
 
 const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
@@ -24,16 +29,40 @@ interface HistoryData {
     idle: number;
     pending: number;
     max: number;
+    heap_used: number;
+    heap_max: number;
+    threads_live: number;
+    cpu_usage: number;
   }>;
 }
 
-export function ComparisonChart({ targetNames, range = '1h' }: ComparisonChartProps) {
+const METRIC_CONFIG: Record<MetricType, { label: string; unit: string; color: string }> = {
+  usage: { label: 'Pool Usage', unit: '%', color: '#3b82f6' },
+  cpu: { label: 'CPU Usage', unit: '%', color: '#f59e0b' },
+  heap: { label: 'Heap Usage', unit: '%', color: '#22c55e' },
+  threads: { label: 'Live Threads', unit: '', color: '#8b5cf6' },
+};
+
+export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }: ComparisonChartProps) {
+  const { colors } = useTheme();
+  const { settings } = useSettings();
+  const timezone = settings?.timezone || 'Local';
   const [data, setData] = useState<{ [key: string]: HistoryData }>({});
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
+  const prevDataRef = useRef<{ [key: string]: HistoryData }>({});
+
+  // Create a stable key for targetNames to prevent unnecessary re-fetches
+  const targetNamesKey = useMemo(() => [...targetNames].sort().join(','), [targetNames]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchAll = async () => {
-      setLoading(true);
+      // Only show loading on initial load, not on polling updates
+      if (initialLoad) {
+        setLoading(true);
+      }
       const results: { [key: string]: HistoryData } = {};
 
       await Promise.all(
@@ -49,14 +78,23 @@ export function ComparisonChart({ targetNames, range = '1h' }: ComparisonChartPr
         })
       );
 
-      setData(results);
-      setLoading(false);
+      if (!cancelled) {
+        prevDataRef.current = results;
+        setData(results);
+        setLoading(false);
+        setInitialLoad(false);
+      }
     };
 
     fetchAll();
-  }, [targetNames, range]);
 
-  if (loading) {
+    return () => {
+      cancelled = true;
+    };
+  }, [targetNamesKey, range]);
+
+  // Only show loading on initial load, use previous data otherwise
+  if (loading && initialLoad) {
     return (
       <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
         Loading comparison data...
@@ -64,24 +102,39 @@ export function ComparisonChart({ targetNames, range = '1h' }: ComparisonChartPr
     );
   }
 
+  // Calculate metric value based on selected metric type
+  const getMetricValue = (dp: HistoryData['datapoints'][0]): number => {
+    switch (metric) {
+      case 'usage':
+        return dp.max > 0 ? (dp.active / dp.max) * 100 : 0;
+      case 'cpu':
+        return (dp.cpu_usage || 0) * 100;
+      case 'heap':
+        return dp.heap_max > 0 ? (dp.heap_used / dp.heap_max) * 100 : 0;
+      case 'threads':
+        return dp.threads_live || 0;
+      default:
+        return 0;
+    }
+  };
+
   // Merge all data points by timestamp
   const timeMap = new Map<string, Record<string, number>>();
+  let maxValue = 0;
 
   targetNames.forEach((name) => {
     const history = data[name];
     if (!history?.datapoints) return;
 
     history.datapoints.forEach((dp) => {
-      const time = new Date(dp.timestamp).toLocaleTimeString('ko-KR', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      const usage = dp.max > 0 ? (dp.active / dp.max) * 100 : 0;
+      const time = formatTime(dp.timestamp, timezone);
+      const value = getMetricValue(dp);
+      maxValue = Math.max(maxValue, value);
 
       if (!timeMap.has(time)) {
         timeMap.set(time, { time: time as unknown as number });
       }
-      timeMap.get(time)![name] = Math.round(usage * 10) / 10;
+      timeMap.get(time)![name] = Math.round(value * 10) / 10;
     });
   });
 
@@ -93,33 +146,42 @@ export function ComparisonChart({ targetNames, range = '1h' }: ComparisonChartPr
 
   if (chartData.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+      <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary }}>
         No comparison data available
       </div>
     );
   }
 
+  const config = METRIC_CONFIG[metric];
+  const isPercentage = metric !== 'threads';
+  const yDomain: [number, number] = isPercentage ? [0, 100] : [0, Math.ceil(maxValue * 1.1)];
+
   return (
     <div>
-      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-        Usage Comparison (%)
+      <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '8px' }}>
+        {config.label} Comparison {config.unit && `(${config.unit})`}
       </div>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="time" stroke="#6b7280" fontSize={11} />
-          <YAxis stroke="#6b7280" fontSize={11} domain={[0, 100]} unit="%" />
+          <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />
+          <XAxis dataKey="time" stroke={colors.textSecondary} fontSize={11} />
+          <YAxis
+            stroke={colors.textSecondary}
+            fontSize={11}
+            domain={yDomain}
+            unit={config.unit}
+          />
           <Tooltip
             contentStyle={{
-              backgroundColor: '#fff',
-              border: '1px solid #e5e7eb',
+              backgroundColor: colors.bgCard,
+              border: `1px solid ${colors.border}`,
               borderRadius: '8px',
               fontSize: '11px',
               padding: '8px 10px',
             }}
-            labelStyle={{ fontSize: '11px', marginBottom: '4px' }}
+            labelStyle={{ fontSize: '11px', marginBottom: '4px', color: colors.text }}
             itemStyle={{ fontSize: '11px', padding: '2px 0' }}
-            formatter={(value) => [`${value}%`, '']}
+            formatter={(value) => [`${value}${config.unit}`, '']}
           />
           <Legend wrapperStyle={{ fontSize: '12px' }} />
           {targetNames.map((name, index) => (
@@ -131,6 +193,7 @@ export function ComparisonChart({ targetNames, range = '1h' }: ComparisonChartPr
               strokeWidth={2}
               dot={false}
               connectNulls
+              isAnimationActive={false}
             />
           ))}
         </LineChart>

@@ -11,6 +11,23 @@ Lightweight connection pool monitor for JVM applications.
 
 ## Quick Start
 
+### Docker (Recommended)
+
+```bash
+# docker-compose로 실행
+docker-compose up -d
+
+# 또는 docker만 사용
+docker run -d -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/data:/app/data \
+  jiin724/pondy:latest
+
+# Open http://localhost:8080
+```
+
+### From Source
+
 ```bash
 # Run mock server (for testing)
 go run ./cmd/mock-actuator

@@ -15,6 +15,7 @@ type Config struct {
 	Storage   StorageConfig   `mapstructure:"storage"`
 	Retention RetentionConfig `mapstructure:"retention"`
 	Targets   []TargetConfig  `mapstructure:"targets"`
+	Timezone  string          `mapstructure:"timezone"` // e.g., "Asia/Seoul", "UTC", "Local"
 }
 
 type RetentionConfig struct {
@@ -28,6 +29,22 @@ func (r *RetentionConfig) GetMaxAge() time.Duration {
 
 func (r *RetentionConfig) GetCleanupInterval() time.Duration {
 	return parseDurationWithDays(r.CleanupInterval, time.Hour)
+}
+
+// GetLocation returns the time.Location for the configured timezone
+func (c *Config) GetLocation() *time.Location {
+	if c.Timezone == "" || c.Timezone == "Local" {
+		return time.Local
+	}
+	if c.Timezone == "UTC" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(c.Timezone)
+	if err != nil {
+		log.Printf("Invalid timezone %s, using Local: %v", c.Timezone, err)
+		return time.Local
+	}
+	return loc
 }
 
 func parseDurationWithDays(s string, defaultVal time.Duration) time.Duration {

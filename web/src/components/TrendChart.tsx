@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -9,22 +10,23 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { PoolMetrics } from '../types/metrics';
+import { useSettings, formatTime } from '../hooks/useMetrics';
 
 interface TrendChartProps {
   data: PoolMetrics[];
   height?: number;
 }
 
-export function TrendChart({ data, height = 300 }: TrendChartProps) {
-  const chartData = data.map((d) => ({
-    time: new Date(d.timestamp).toLocaleTimeString('ko-KR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
+export const TrendChart = memo(function TrendChart({ data, height = 300 }: TrendChartProps) {
+  const { settings } = useSettings();
+  const timezone = settings?.timezone || 'Local';
+
+  const chartData = useMemo(() => data.map((d) => ({
+    time: formatTime(d.timestamp, timezone),
     active: d.active,
     idle: d.idle,
     pending: d.pending,
-  }));
+  })), [data, timezone]);
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -51,6 +53,7 @@ export function TrendChart({ data, height = 300 }: TrendChartProps) {
           strokeWidth={2}
           dot={false}
           name="Active"
+          isAnimationActive={false}
         />
         <Line
           type="monotone"
@@ -59,6 +62,7 @@ export function TrendChart({ data, height = 300 }: TrendChartProps) {
           strokeWidth={2}
           dot={false}
           name="Idle"
+          isAnimationActive={false}
         />
         <Line
           type="monotone"
@@ -67,8 +71,9 @@ export function TrendChart({ data, height = 300 }: TrendChartProps) {
           strokeWidth={2}
           dot={false}
           name="Pending"
+          isAnimationActive={false}
         />
       </LineChart>
     </ResponsiveContainer>
   );
-}
+});

@@ -2,12 +2,19 @@ export interface PoolMetrics {
   id: number;
   target_name: string;
   instance_name: string;
+   status: string;
   active: number;
   idle: number;
   pending: number;
   max: number;
   timeout: number;
   acquire_p99: number;
+  // JVM metrics
+  heap_used: number;
+  heap_max: number;
+  non_heap_used: number;
+  threads_live: number;
+  cpu_usage: number;
   timestamp: string;
 }
 

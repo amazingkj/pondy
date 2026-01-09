@@ -1,12 +1,98 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TargetsResponse, HistoryResponse, AnalysisResult, LeakAnalysisResult } from '../types/metrics';
 
 const API_BASE = '/api';
+
+// Hook to check if the page is visible
+function usePageVisibility() {
+  const [isVisible, setIsVisible] = useState(!document.hidden);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsVisible(!document.hidden);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  return isVisible;
+}
+
+// Settings interface
+export interface Settings {
+  timezone: string;
+}
+
+// Cache for settings
+let cachedSettings: Settings | null = null;
+
+export function useSettings() {
+  const [settings, setSettings] = useState<Settings | null>(cachedSettings);
+  const [loading, setLoading] = useState(!cachedSettings);
+
+  useEffect(() => {
+    if (cachedSettings) return;
+
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/settings`);
+        if (res.ok) {
+          const json = await res.json();
+          cachedSettings = json;
+          setSettings(json);
+        }
+      } catch {
+        // Use default settings
+        cachedSettings = { timezone: 'Local' };
+        setSettings(cachedSettings);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSettings();
+  }, []);
+
+  return { settings, loading };
+}
+
+// Format time based on timezone setting
+export function formatTime(timestamp: string, timezone: string = 'Local'): string {
+  const date = new Date(timestamp);
+
+  // Handle special timezone values
+  if (timezone === 'Local' || timezone === '') {
+    return date.toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  // Use specific timezone
+  try {
+    return date.toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone === 'UTC' ? 'UTC' : timezone,
+    });
+  } catch {
+    // Fallback to local time if timezone is invalid
+    return date.toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+}
 
 export function useTargets(refreshInterval = 5000) {
   const [data, setData] = useState<TargetsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = usePageVisibility();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTargets = useCallback(async () => {
     try {
@@ -24,9 +110,24 @@ export function useTargets(refreshInterval = 5000) {
 
   useEffect(() => {
     fetchTargets();
-    const interval = setInterval(fetchTargets, refreshInterval);
-    return () => clearInterval(interval);
-  }, [fetchTargets, refreshInterval]);
+  }, [fetchTargets]);
+
+  // Pause polling when tab is not visible
+  useEffect(() => {
+    if (isVisible) {
+      fetchTargets(); // Refresh immediately when becoming visible
+      intervalRef.current = setInterval(fetchTargets, refreshInterval);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [isVisible, fetchTargets, refreshInterval]);
 
   return { data, loading, error, refetch: fetchTargets };
 }
@@ -35,6 +136,8 @@ export function useHistory(targetName: string, range = '1h') {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = usePageVisibility();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchHistory = useCallback(async () => {
     if (!targetName) return;
@@ -52,10 +155,26 @@ export function useHistory(targetName: string, range = '1h') {
   }, [targetName, range]);
 
   useEffect(() => {
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 10000);
-    return () => clearInterval(interval);
-  }, [fetchHistory]);
+    if (targetName) fetchHistory();
+  }, [fetchHistory, targetName]);
+
+  // Pause polling when tab is not visible
+  useEffect(() => {
+    if (!targetName) return;
+
+    if (isVisible) {
+      intervalRef.current = setInterval(fetchHistory, 10000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [isVisible, fetchHistory, targetName]);
 
   return { data, loading, error, refetch: fetchHistory };
 }

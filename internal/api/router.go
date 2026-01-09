@@ -19,6 +19,7 @@ func NewRouter(cfg *config.Config, store storage.Storage, webFS embed.FS) *gin.E
 
 	api := r.Group("/api")
 	{
+		api.GET("/settings", handler.GetSettings)
 		api.GET("/targets", handler.GetTargets)
 		api.GET("/targets/:name/instances", handler.GetInstances)
 		api.GET("/targets/:name/metrics", handler.GetTargetMetrics)
@@ -30,6 +31,7 @@ func NewRouter(cfg *config.Config, store storage.Storage, webFS embed.FS) *gin.E
 		api.GET("/targets/:name/anomalies", handler.DetectAnomalies)
 		api.GET("/targets/:name/compare", handler.ComparePeriods)
 		api.GET("/targets/:name/report", handler.GenerateReport)
+		api.GET("/report/combined", handler.GenerateCombinedReport)
 	}
 
 	// Health check
@@ -48,6 +50,9 @@ func NewRouter(cfg *config.Config, store storage.Storage, webFS embed.FS) *gin.E
 		staticHandler.ServeHTTP(c.Writer, c.Request)
 	})
 	r.GET("/assets/*filepath", func(c *gin.Context) {
+		staticHandler.ServeHTTP(c.Writer, c.Request)
+	})
+	r.GET("/pondy.svg", func(c *gin.Context) {
 		staticHandler.ServeHTTP(c.Writer, c.Request)
 	})
 	r.NoRoute(func(c *gin.Context) {

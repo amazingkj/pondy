@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,15 +15,25 @@ import (
 	"github.com/jiin/pondy/internal/storage"
 )
 
+// Cache entry for targets response
+type cacheEntry struct {
+	data      TargetsResponse
+	timestamp time.Time
+}
+
 type Handler struct {
-	cfg   *config.Config
-	store storage.Storage
+	cfg          *config.Config
+	store        storage.Storage
+	cache        *cacheEntry
+	cacheMu      sync.RWMutex
+	cacheTTL     time.Duration
 }
 
 func NewHandler(cfg *config.Config, store storage.Storage) *Handler {
 	return &Handler{
-		cfg:   cfg,
-		store: store,
+		cfg:      cfg,
+		store:    store,
+		cacheTTL: 2 * time.Second, // 2 second cache TTL
 	}
 }
 
@@ -30,7 +41,29 @@ type TargetsResponse struct {
 	Targets []models.TargetStatus `json:"targets"`
 }
 
+// GetSettings returns client-side settings like timezone
+func (h *Handler) GetSettings(c *gin.Context) {
+	timezone := h.cfg.Timezone
+	if timezone == "" {
+		timezone = "Local"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"timezone": timezone,
+	})
+}
+
 func (h *Handler) GetTargets(c *gin.Context) {
+	// Check cache first
+	h.cacheMu.RLock()
+	if h.cache != nil && time.Since(h.cache.timestamp) < h.cacheTTL {
+		response := h.cache.data
+		h.cacheMu.RUnlock()
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	h.cacheMu.RUnlock()
+
 	var targets []models.TargetStatus
 
 	// Get configured targets
@@ -40,6 +73,12 @@ func (h *Handler) GetTargets(c *gin.Context) {
 			Status: "unknown",
 		}
 
+		// Calculate stale threshold (3x the collection interval, minimum 30s)
+		staleThreshold := t.Interval * 3
+		if staleThreshold < 30*time.Second {
+			staleThreshold = 30 * time.Second
+		}
+
 		// Get all instances for this target
 		instanceMetrics, err := h.store.GetLatestAllInstances(t.Name)
 		if err == nil && len(instanceMetrics) > 0 {
@@ -47,55 +86,95 @@ func (h *Handler) GetTargets(c *gin.Context) {
 			var instances []models.InstanceStatus
 			var totalActive, totalIdle, totalPending, totalMax int
 			worstStatus := "healthy"
+			allStale := true
 
 			for _, m := range instanceMetrics {
+				// Check if metrics are stale
+				isStale := time.Since(m.Timestamp) > staleThreshold
+				if !isStale {
+					allStale = false
+				}
+
 				instStatus := h.determineStatus(&m)
+				if isStale {
+					instStatus = "unknown"
+				}
+
+				// Only include non-stale metrics in current data
+				var currentMetrics *models.PoolMetrics
+				if !isStale {
+					currentMetrics = &m
+					totalActive += m.Active
+					totalIdle += m.Idle
+					totalPending += m.Pending
+					totalMax += m.Max
+				}
+
 				instances = append(instances, models.InstanceStatus{
 					InstanceName: m.InstanceName,
 					Status:       instStatus,
-					Current:      &m,
+					Current:      currentMetrics,
 				})
 
-				totalActive += m.Active
-				totalIdle += m.Idle
-				totalPending += m.Pending
-				totalMax += m.Max
-
 				// Track worst status
-				if instStatus == "critical" || (instStatus == "warning" && worstStatus == "healthy") {
-					worstStatus = instStatus
+				if !isStale {
+					if instStatus == "critical" || (instStatus == "warning" && worstStatus == "healthy") {
+						worstStatus = instStatus
+					}
 				}
 			}
 
 			status.Instances = instances
-			status.Status = worstStatus
 
-			// Set aggregated current metrics (for backward compatibility)
-			if len(instanceMetrics) == 1 {
-				status.Current = &instanceMetrics[0]
+			// If all instances are stale, mark target as unknown with no current data
+			if allStale {
+				status.Status = "unknown"
+				status.Current = nil
 			} else {
-				status.Current = &models.PoolMetrics{
-					TargetName:   t.Name,
-					InstanceName: "aggregated",
-					Active:       totalActive,
-					Idle:         totalIdle,
-					Pending:      totalPending,
-					Max:          totalMax,
+				status.Status = worstStatus
+				// Set aggregated current metrics (for backward compatibility)
+				if len(instanceMetrics) == 1 && time.Since(instanceMetrics[0].Timestamp) <= staleThreshold {
+					status.Current = &instanceMetrics[0]
+				} else if totalMax > 0 {
+					status.Current = &models.PoolMetrics{
+						TargetName:   t.Name,
+						InstanceName: "aggregated",
+						Active:       totalActive,
+						Idle:         totalIdle,
+						Pending:      totalPending,
+						Max:          totalMax,
+					}
 				}
 			}
 		} else {
 			// Fallback to old behavior
 			metrics, err := h.store.GetLatest(t.Name)
 			if err == nil && metrics != nil {
-				status.Current = metrics
-				status.Status = h.determineStatus(metrics)
+				// Check if metrics are stale
+				if time.Since(metrics.Timestamp) > staleThreshold {
+					status.Status = "unknown"
+					status.Current = nil
+				} else {
+					status.Current = metrics
+					status.Status = h.determineStatus(metrics)
+				}
 			}
 		}
 
 		targets = append(targets, status)
 	}
 
-	c.JSON(http.StatusOK, TargetsResponse{Targets: targets})
+	response := TargetsResponse{Targets: targets}
+
+	// Update cache
+	h.cacheMu.Lock()
+	h.cache = &cacheEntry{
+		data:      response,
+		timestamp: time.Now(),
+	}
+	h.cacheMu.Unlock()
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) GetInstances(c *gin.Context) {
@@ -238,18 +317,24 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write([]string{"timestamp", "active", "idle", "pending", "max", "timeout", "acquire_p99"})
+	writer.Write([]string{"timestamp", "status", "active", "idle", "pending", "max", "timeout", "acquire_p99", "heap_used", "heap_max", "non_heap_used", "threads_live", "cpu_usage"})
 
 	// Write data
 	for _, d := range datapoints {
 		writer.Write([]string{
 			d.Timestamp.Format(time.RFC3339),
+			d.Status,
 			fmt.Sprintf("%d", d.Active),
 			fmt.Sprintf("%d", d.Idle),
 			fmt.Sprintf("%d", d.Pending),
 			fmt.Sprintf("%d", d.Max),
 			fmt.Sprintf("%d", d.Timeout),
 			fmt.Sprintf("%.2f", d.AcquireP99),
+			fmt.Sprintf("%d", d.HeapUsed),
+			fmt.Sprintf("%d", d.HeapMax),
+			fmt.Sprintf("%d", d.NonHeapUsed),
+			fmt.Sprintf("%d", d.ThreadsLive),
+			fmt.Sprintf("%.4f", d.CpuUsage),
 		})
 	}
 }
@@ -404,7 +489,7 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 	reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime)
 
 	// Generate HTML report
-	htmlBytes, err := report.GenerateHTMLReport(reportData)
+	htmlBytes, err := report.GenerateHTMLReport(&reportData)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -412,4 +497,103 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Data(http.StatusOK, "text/html", htmlBytes)
+}
+
+func (h *Handler) GenerateCombinedReport(c *gin.Context) {
+	targetsParam := c.Query("targets")
+	rangeParam := c.DefaultQuery("range", "24h")
+
+	if targetsParam == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "targets parameter is required"})
+		return
+	}
+
+	duration, err := time.ParseDuration(rangeParam)
+	if err != nil {
+		duration = 24 * time.Hour
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	// Parse target names
+	var targetNames []string
+	for _, name := range splitAndTrim(targetsParam, ",") {
+		if name != "" {
+			targetNames = append(targetNames, name)
+		}
+	}
+
+	if len(targetNames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid targets specified"})
+		return
+	}
+
+	// Collect reports for all targets
+	var allReports []report.ReportData
+	for _, name := range targetNames {
+		datapoints, err := h.store.GetHistory(name, from, to)
+		if err != nil || len(datapoints) == 0 {
+			continue
+		}
+
+		recs := analyzer.Analyze(datapoints)
+		leaks := analyzer.DetectLeaks(datapoints)
+		anomalies := analyzer.DetectAnomalies(name, datapoints)
+		peakTime := analyzer.AnalyzePeakTime(name, datapoints)
+
+		reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime)
+		allReports = append(allReports, reportData)
+	}
+
+	if len(allReports) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no data available for any target"})
+		return
+	}
+
+	// Generate combined HTML report
+	htmlBytes, err := report.GenerateCombinedHTMLReport(allReports, rangeParam)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Data(http.StatusOK, "text/html", htmlBytes)
+}
+
+func splitAndTrim(s, sep string) []string {
+	var result []string
+	for _, part := range splitString(s, sep) {
+		trimmed := trimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func splitString(s, sep string) []string {
+	var result []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
+			result = append(result, s[start:i])
+			start = i + len(sep)
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }
