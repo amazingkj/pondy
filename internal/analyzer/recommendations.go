@@ -36,14 +36,20 @@ type PoolStats struct {
 	TimeoutCount int64   `json:"timeout_count"`
 }
 
-func Analyze(metrics []models.PoolMetrics) *AnalysisResult {
+// Analyze analyzes pool metrics and generates recommendations
+// loc is the timezone for timestamps (if nil, uses UTC)
+func Analyze(metrics []models.PoolMetrics, loc *time.Location) *AnalysisResult {
 	if len(metrics) == 0 {
 		return nil
 	}
 
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	result := &AnalysisResult{
 		TargetName:      metrics[0].TargetName,
-		AnalyzedAt:      time.Now(),
+		AnalyzedAt:      time.Now().In(loc),
 		DataPoints:      len(metrics),
 		Recommendations: []Recommendation{},
 	}

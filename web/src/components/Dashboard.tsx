@@ -1,48 +1,118 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTargets } from '../hooks/useMetrics';
 import { TargetCard } from './TargetCard';
 import { Overview } from './Overview';
 import { useTheme } from '../context/ThemeContext';
+import { useKeyboardShortcuts, useShortcutsHelp } from '../hooks/useKeyboardShortcuts';
+import { ShortcutsHelp } from './ShortcutsHelp';
 
 export type GlobalView = 'trend' | 'recs' | 'leaks' | 'peakTime' | 'anomalies' | 'heatmap' | null;
+
+const STORAGE_KEYS = {
+  TARGET_ORDER: 'pondy-target-order',
+  SELECTED_GROUP: 'pondy-selected-group',
+};
 
 export function Dashboard() {
   const { data, loading, error } = useTargets(5000);
   const [globalView, setGlobalView] = useState<GlobalView>(null);
-  const [targetOrder, setTargetOrder] = useState<string[]>([]);
+  const [targetOrder, setTargetOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.TARGET_ORDER);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.SELECTED_GROUP);
+    } catch {
+      return null;
+    }
+  });
   const { theme, toggleTheme, colors } = useTheme();
 
-  // Initialize target order when data loads
+  // Save target order to localStorage
   useEffect(() => {
-    if (data?.targets && targetOrder.length === 0) {
-      setTargetOrder(data.targets.map(t => t.name));
-    }
-  }, [data?.targets, targetOrder.length]);
-
-  // Merge new targets into the existing order
-  useEffect(() => {
-    if (data?.targets) {
-      const currentNames = data.targets.map(t => t.name);
-      const existingInOrder = targetOrder.filter(name => currentNames.includes(name));
-      const newTargets = currentNames.filter(name => !targetOrder.includes(name));
-      if (newTargets.length > 0 || existingInOrder.length !== targetOrder.length) {
-        setTargetOrder([...existingInOrder, ...newTargets]);
+    if (targetOrder.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.TARGET_ORDER, JSON.stringify(targetOrder));
+      } catch {
+        // Ignore storage errors
       }
     }
-  }, [data?.targets, targetOrder]);
+  }, [targetOrder]);
 
-  const handleGlobalToggle = (view: GlobalView) => {
-    setGlobalView(globalView === view ? null : view);
-  };
+  // Save selected group to localStorage
+  useEffect(() => {
+    try {
+      if (selectedGroup) {
+        localStorage.setItem(STORAGE_KEYS.SELECTED_GROUP, selectedGroup);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.SELECTED_GROUP);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [selectedGroup]);
 
-  // Get ordered targets
+  // Initialize target order when data loads (merge with saved order)
+  useEffect(() => {
+    if (data?.targets && data.targets.length > 0) {
+      const currentNames = data.targets.map(t => t.name);
+      if (targetOrder.length === 0) {
+        // No saved order, use data order
+        setTargetOrder(currentNames);
+      } else {
+        // Merge: keep saved order for existing targets, append new ones
+        const existingInOrder = targetOrder.filter(name => currentNames.includes(name));
+        const newTargets = currentNames.filter(name => !targetOrder.includes(name));
+        if (newTargets.length > 0 || existingInOrder.length !== targetOrder.length) {
+          setTargetOrder([...existingInOrder, ...newTargets]);
+        }
+      }
+    }
+  }, [data?.targets]);
+
+  const handleGlobalToggle = useCallback((view: GlobalView) => {
+    setGlobalView(prev => prev === view ? null : view);
+  }, []);
+
+  // Keyboard shortcuts
+  const shortcutsHelp = useShortcutsHelp();
+
+  const shortcuts = useMemo(() => [
+    { key: 'r', action: () => window.location.reload(), description: 'Reload page' },
+    { key: 't', action: () => handleGlobalToggle('trend'), description: 'Toggle Trends view' },
+    { key: 'h', action: () => handleGlobalToggle('heatmap'), description: 'Toggle Heatmap view' },
+    { key: 'd', action: toggleTheme, description: 'Toggle dark mode' },
+    { key: 'Escape', action: () => { setGlobalView(null); setSelectedGroup(null); }, description: 'Clear selections' },
+    { key: '?', action: shortcutsHelp.toggle, description: 'Show shortcuts help' },
+  ], [handleGlobalToggle, toggleTheme, shortcutsHelp.toggle]);
+
+  useKeyboardShortcuts(shortcuts);
+
+  // Get unique groups from data
+  const groups = useMemo(() => {
+    return data?.groups || [];
+  }, [data?.groups]);
+
+  // Get ordered and filtered targets
   const orderedTargets = useMemo(() => {
     if (!data?.targets) return [];
     const targetMap = new Map(data.targets.map(t => [t.name, t]));
-    return targetOrder
+    let targets = targetOrder
       .filter(name => targetMap.has(name))
       .map(name => targetMap.get(name)!);
-  }, [data?.targets, targetOrder]);
+
+    // Filter by selected group
+    if (selectedGroup) {
+      targets = targets.filter(t => t.group === selectedGroup);
+    }
+
+    return targets;
+  }, [data?.targets, targetOrder, selectedGroup]);
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: colors.bg, transition: 'background-color 0.2s' }}>
@@ -55,13 +125,55 @@ export function Dashboard() {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: colors.text }}>
-              pondy
-            </h1>
-            <p style={{ margin: '4px 0 0', fontSize: '14px', color: colors.textSecondary }}>
-              Connection Pool Monitor
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: colors.text }}>
+                pondy
+              </h1>
+              <p style={{ margin: '4px 0 0', fontSize: '14px', color: colors.textSecondary }}>
+                Connection Pool Monitor
+              </p>
+            </div>
+            {groups.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={() => setSelectedGroup(null)}
+                  style={{
+                    padding: '6px 12px',
+                    border: `1px solid ${selectedGroup === null ? colors.accent : colors.border}`,
+                    borderRadius: '16px',
+                    backgroundColor: selectedGroup === null ? (theme === 'dark' ? '#1e3a5f' : '#dbeafe') : 'transparent',
+                    color: selectedGroup === null ? colors.accent : colors.textSecondary,
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  All
+                </button>
+                {groups.map(group => (
+                  <button
+                    key={group}
+                    onClick={() => setSelectedGroup(group)}
+                    style={{
+                      padding: '6px 12px',
+                      border: `1px solid ${selectedGroup === group ? colors.accent : colors.border}`,
+                      borderRadius: '16px',
+                      backgroundColor: selectedGroup === group ? (theme === 'dark' ? '#1e3a5f' : '#dbeafe') : 'transparent',
+                      color: selectedGroup === group ? colors.accent : colors.textSecondary,
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      textTransform: 'capitalize',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {group}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <button
             onClick={toggleTheme}
@@ -139,8 +251,8 @@ export function Dashboard() {
                 gap: '16px',
               }}
             >
-              {orderedTargets.map((target) => (
-                <TargetCard key={target.name} target={target} globalView={globalView} />
+              {orderedTargets.map((target, index) => (
+                <TargetCard key={target.name} target={target} globalView={globalView} renderIndex={index} />
               ))}
             </div>
           </>
@@ -214,9 +326,38 @@ export function Dashboard() {
             >
               Docs
             </a>
+            <button
+              onClick={shortcutsHelp.open}
+              style={{
+                background: 'none',
+                border: `1px solid ${colors.border}`,
+                borderRadius: '4px',
+                padding: '4px 10px',
+                color: colors.textSecondary,
+                cursor: 'pointer',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+              title="Keyboard shortcuts (Press ? to open)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+              </svg>
+              Shortcuts
+            </button>
           </div>
         </div>
       </footer>
+
+      {/* Keyboard Shortcuts Help Modal */}
+      <ShortcutsHelp
+        isOpen={shortcutsHelp.isOpen}
+        onClose={shortcutsHelp.close}
+        shortcuts={shortcuts}
+      />
     </div>
   );
 }

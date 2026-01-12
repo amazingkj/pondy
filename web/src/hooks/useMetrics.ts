@@ -60,8 +60,11 @@ export function useSettings() {
 }
 
 // Format time based on timezone setting
-export function formatTime(timestamp: string, timezone: string = 'Local'): string {
+export function formatTime(timestamp: string | undefined | null, timezone: string = 'Local'): string {
+  if (!timestamp) return '--:--';
+
   const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return '--:--';
 
   // Handle special timezone values
   if (timezone === 'Local' || timezone === '') {

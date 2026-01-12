@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/md5"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -13,9 +16,16 @@ import (
 type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	Storage   StorageConfig   `mapstructure:"storage"`
+	Logging   LoggingConfig   `mapstructure:"logging"`
 	Retention RetentionConfig `mapstructure:"retention"`
 	Targets   []TargetConfig  `mapstructure:"targets"`
 	Timezone  string          `mapstructure:"timezone"` // e.g., "Asia/Seoul", "UTC", "Local"
+}
+
+// LoggingConfig holds logging configuration
+type LoggingConfig struct {
+	Level  string `mapstructure:"level"`  // debug, info, warn, error (default: info)
+	Format string `mapstructure:"format"` // text, json (default: text)
 }
 
 type RetentionConfig struct {
@@ -78,6 +88,7 @@ type TargetConfig struct {
 	Type      string           `mapstructure:"type"`
 	Endpoint  string           `mapstructure:"endpoint"`
 	Interval  time.Duration    `mapstructure:"interval"`
+	Group     string           `mapstructure:"group"` // Environment group: dev, staging, prod, etc.
 	Instances []InstanceConfig `mapstructure:"instances"`
 }
 
@@ -100,9 +111,13 @@ func (t *TargetConfig) GetInstances() []InstanceConfig {
 
 // Manager handles configuration with hot reload support
 type Manager struct {
-	mu        sync.RWMutex
-	config    *Config
-	callbacks []func(*Config)
+	mu           sync.RWMutex
+	config       *Config
+	callbacks    []func(*Config)
+	configPath   string
+	lastHash     string
+	pollInterval time.Duration
+	stopPolling  chan struct{}
 }
 
 // NewManager creates a new config manager with hot reload
@@ -112,6 +127,8 @@ func NewManager(path string) (*Manager, error) {
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("storage.path", "./data/pondy.db")
+	viper.SetDefault("logging.level", "info")
+	viper.SetDefault("logging.format", "text")
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err
@@ -122,19 +139,92 @@ func NewManager(path string) (*Manager, error) {
 		return nil, err
 	}
 
+	// Calculate initial hash
+	initialHash, _ := fileHash(path)
+
 	m := &Manager{
-		config:    &cfg,
-		callbacks: make([]func(*Config), 0),
+		config:       &cfg,
+		callbacks:    make([]func(*Config), 0),
+		configPath:   path,
+		lastHash:     initialHash,
+		pollInterval: 5 * time.Second, // Poll every 5 seconds
+		stopPolling:  make(chan struct{}),
 	}
 
-	// Watch for config changes
+	// Watch for config changes (fsnotify - works on native filesystems)
 	viper.OnConfigChange(func(e fsnotify.Event) {
-		log.Printf("Config file changed: %s", e.Name)
+		log.Printf("Config file changed (fsnotify): %s", e.Name)
 		m.reload()
+		m.updateHash()
 	})
 	viper.WatchConfig()
 
+	// Start polling for Docker/mounted volume environments
+	go m.pollForChanges()
+
+	log.Printf("Config hot-reload enabled (fsnotify + polling every %v)", m.pollInterval)
+
 	return m, nil
+}
+
+// fileHash calculates MD5 hash of a file
+func fileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// pollForChanges polls the config file for changes (Docker-friendly)
+func (m *Manager) pollForChanges() {
+	ticker := time.NewTicker(m.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			currentHash, err := fileHash(m.configPath)
+			if err != nil {
+				continue
+			}
+
+			m.mu.RLock()
+			lastHash := m.lastHash
+			m.mu.RUnlock()
+
+			if currentHash != lastHash {
+				log.Printf("Config file changed (polling detected)")
+				m.reload()
+				m.updateHash()
+			}
+		case <-m.stopPolling:
+			return
+		}
+	}
+}
+
+// updateHash updates the stored file hash
+func (m *Manager) updateHash() {
+	hash, err := fileHash(m.configPath)
+	if err != nil {
+		return
+	}
+	m.mu.Lock()
+	m.lastHash = hash
+	m.mu.Unlock()
+}
+
+// Stop stops the config manager polling
+func (m *Manager) Stop() {
+	close(m.stopPolling)
 }
 
 // Get returns the current configuration
@@ -178,6 +268,8 @@ func Load(path string) (*Config, error) {
 
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("storage.path", "./data/pondy.db")
+	viper.SetDefault("logging.level", "info")
+	viper.SetDefault("logging.format", "text")
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err

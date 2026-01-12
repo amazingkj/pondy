@@ -27,11 +27,18 @@ type LeakAnalysisResult struct {
 	HealthScore  int         `json:"health_score"` // 0-100
 }
 
-func DetectLeaks(metrics []models.PoolMetrics) *LeakAnalysisResult {
+// DetectLeaks analyzes metrics for connection leak patterns
+// loc is the timezone for timestamps (if nil, uses UTC)
+func DetectLeaks(metrics []models.PoolMetrics, loc *time.Location) *LeakAnalysisResult {
+	if loc == nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+
 	if len(metrics) < 6 { // Need at least 1 minute of data (10s intervals)
 		return &LeakAnalysisResult{
 			TargetName:  metrics[0].TargetName,
-			AnalyzedAt:  time.Now(),
+			AnalyzedAt:  now,
 			DataPoints:  len(metrics),
 			HasLeak:     false,
 			LeakRisk:    "unknown",
@@ -42,7 +49,7 @@ func DetectLeaks(metrics []models.PoolMetrics) *LeakAnalysisResult {
 
 	result := &LeakAnalysisResult{
 		TargetName:  metrics[0].TargetName,
-		AnalyzedAt:  time.Now(),
+		AnalyzedAt:  now,
 		DataPoints:  len(metrics),
 		HasLeak:     false,
 		LeakRisk:    "none",
@@ -51,10 +58,10 @@ func DetectLeaks(metrics []models.PoolMetrics) *LeakAnalysisResult {
 	}
 
 	// Analyze for different leak patterns
-	analyzeHighActivePattern(metrics, result)
-	analyzeNoIdlePattern(metrics, result)
-	analyzePendingPattern(metrics, result)
-	analyzeGrowthPattern(metrics, result)
+	analyzeHighActivePattern(metrics, result, now)
+	analyzeNoIdlePattern(metrics, result, now)
+	analyzePendingPattern(metrics, result, now)
+	analyzeGrowthPattern(metrics, result, now)
 
 	// Calculate final risk level
 	calculateRisk(result)
@@ -63,7 +70,7 @@ func DetectLeaks(metrics []models.PoolMetrics) *LeakAnalysisResult {
 }
 
 // Detect sustained high active connections
-func analyzeHighActivePattern(metrics []models.PoolMetrics, result *LeakAnalysisResult) {
+func analyzeHighActivePattern(metrics []models.PoolMetrics, result *LeakAnalysisResult, now time.Time) {
 	highCount := 0
 	var totalActive float64
 	threshold := 0.8 // 80% of max
@@ -83,7 +90,7 @@ func analyzeHighActivePattern(metrics []models.PoolMetrics, result *LeakAnalysis
 			Type:       "sustained_high_usage",
 			Severity:   "warning",
 			Message:    "Connection pool consistently at high utilization",
-			DetectedAt: time.Now(),
+			DetectedAt: now,
 			Duration:   calculateDuration(metrics),
 			AvgActive:  avgActive,
 			Suggestions: []string{
@@ -97,7 +104,7 @@ func analyzeHighActivePattern(metrics []models.PoolMetrics, result *LeakAnalysis
 }
 
 // Detect no idle connections available
-func analyzeNoIdlePattern(metrics []models.PoolMetrics, result *LeakAnalysisResult) {
+func analyzeNoIdlePattern(metrics []models.PoolMetrics, result *LeakAnalysisResult, now time.Time) {
 	noIdleCount := 0
 	var totalIdle float64
 
@@ -116,7 +123,7 @@ func analyzeNoIdlePattern(metrics []models.PoolMetrics, result *LeakAnalysisResu
 			Type:       "no_idle_connections",
 			Severity:   "critical",
 			Message:    "Pool exhausted - no idle connections available",
-			DetectedAt: time.Now(),
+			DetectedAt: now,
 			Duration:   calculateDuration(metrics),
 			AvgIdle:    avgIdle,
 			Suggestions: []string{
@@ -132,7 +139,7 @@ func analyzeNoIdlePattern(metrics []models.PoolMetrics, result *LeakAnalysisResu
 }
 
 // Detect persistent pending requests
-func analyzePendingPattern(metrics []models.PoolMetrics, result *LeakAnalysisResult) {
+func analyzePendingPattern(metrics []models.PoolMetrics, result *LeakAnalysisResult, now time.Time) {
 	pendingCount := 0
 	var totalPending float64
 	maxPending := 0
@@ -154,7 +161,7 @@ func analyzePendingPattern(metrics []models.PoolMetrics, result *LeakAnalysisRes
 			Type:       "persistent_pending",
 			Severity:   "warning",
 			Message:    "Threads frequently waiting for connections",
-			DetectedAt: time.Now(),
+			DetectedAt: now,
 			Duration:   calculateDuration(metrics),
 			AvgActive:  totalPending / float64(len(metrics)),
 			Suggestions: []string{
@@ -168,7 +175,7 @@ func analyzePendingPattern(metrics []models.PoolMetrics, result *LeakAnalysisRes
 }
 
 // Detect gradual growth pattern (leak indicator)
-func analyzeGrowthPattern(metrics []models.PoolMetrics, result *LeakAnalysisResult) {
+func analyzeGrowthPattern(metrics []models.PoolMetrics, result *LeakAnalysisResult, now time.Time) {
 	if len(metrics) < 12 { // Need more data for trend
 		return
 	}
@@ -196,7 +203,7 @@ func analyzeGrowthPattern(metrics []models.PoolMetrics, result *LeakAnalysisResu
 				Type:       "growing_active_trend",
 				Severity:   "critical",
 				Message:    "Active connections showing upward trend - possible leak",
-				DetectedAt: time.Now(),
+				DetectedAt: now,
 				Duration:   calculateDuration(metrics),
 				AvgActive:  lastQuarterAvg,
 				Suggestions: []string{

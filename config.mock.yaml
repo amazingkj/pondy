@@ -1,15 +1,23 @@
 server:
-  port: 8081
+  port: 8080
 
 storage:
   path: ./data/pondy.db
 
+logging:
+  level: info
+  format: text
+
 retention:
-  max_age: 30d
+  max_age: 7d
   cleanup_interval: 1h
 
+timezone: Asia/Seoul
+
 targets:
+  # Mock server (built-in)
   - name: mock-service
     type: actuator
     endpoint: http://localhost:9090/actuator/metrics
-    interval: 10s
+    interval: 5s
+    group: demo

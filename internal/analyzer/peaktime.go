@@ -39,7 +39,11 @@ type PeakTimeSummary struct {
 }
 
 // AnalyzePeakTime analyzes metrics to find peak usage times
-func AnalyzePeakTime(targetName string, metrics []models.PoolMetrics) *PeakTimeResult {
+// loc is the timezone to use for hour calculations (if nil, uses UTC)
+func AnalyzePeakTime(targetName string, metrics []models.PoolMetrics, loc *time.Location) *PeakTimeResult {
+	if loc == nil {
+		loc = time.UTC
+	}
 	if len(metrics) == 0 {
 		return &PeakTimeResult{
 			TargetName: targetName,
@@ -56,10 +60,10 @@ func AnalyzePeakTime(targetName string, metrics []models.PoolMetrics) *PeakTimeR
 		}
 	}
 
-	// Collect data by hour
+	// Collect data by hour (using configured timezone)
 	var minTime, maxTime time.Time
 	for i, m := range metrics {
-		hour := m.Timestamp.Hour()
+		hour := m.Timestamp.In(loc).Hour()
 		usage := float64(0)
 		if m.Max > 0 {
 			usage = float64(m.Active) / float64(m.Max) * 100

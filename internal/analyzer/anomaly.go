@@ -39,7 +39,12 @@ type AnomalyStats struct {
 }
 
 // DetectAnomalies analyzes metrics for unusual patterns
-func DetectAnomalies(targetName string, metrics []models.PoolMetrics) *AnomalyResult {
+// loc is the timezone for timestamps (if nil, uses UTC)
+func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.Location) *AnomalyResult {
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	if len(metrics) < 10 {
 		return &AnomalyResult{
 			TargetName: targetName,
@@ -94,7 +99,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics) *AnomalyRe
 			}
 
 			anomalies = append(anomalies, Anomaly{
-				Timestamp: m.Timestamp,
+				Timestamp: m.Timestamp.In(loc),
 				Type:      anomalyType,
 				Severity:  severity,
 				Message:   message,
@@ -109,7 +114,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics) *AnomalyRe
 			change := (usage - usages[i-1]) / usages[i-1] * 100
 			if change > 50 {
 				anomalies = append(anomalies, Anomaly{
-					Timestamp: m.Timestamp,
+					Timestamp: m.Timestamp.In(loc),
 					Type:      "sudden_spike",
 					Severity:  "warning",
 					Message:   "Sudden increase in usage detected",
@@ -120,7 +125,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics) *AnomalyRe
 			}
 			if change < -50 {
 				anomalies = append(anomalies, Anomaly{
-					Timestamp: m.Timestamp,
+					Timestamp: m.Timestamp.In(loc),
 					Type:      "sudden_drop",
 					Severity:  "warning",
 					Message:   "Sudden decrease in usage detected",
@@ -136,7 +141,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics) *AnomalyRe
 			pendingRatio := float64(m.Pending) / float64(m.Max) * 100
 			if pendingRatio > 10 {
 				anomalies = append(anomalies, Anomaly{
-					Timestamp: m.Timestamp,
+					Timestamp: m.Timestamp.In(loc),
 					Type:      "high_pending",
 					Severity:  "critical",
 					Message:   "High number of pending connections",

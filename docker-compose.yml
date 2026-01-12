@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  pondy:
+    image: jiin724/pondy:latest
+    container_name: pondy
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Configuration file (required)
+      - ./config.yaml:/app/config.yaml:ro
+      # Data directory for SQLite database
+      - pondy-data:/app/data
+    environment:
+      # Optional: Set timezone for the container
+      - TZ=Asia/Seoul
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Resource limits (optional, uncomment if needed)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 256M
+    #     reservations:
+    #       cpus: '0.1'
+    #       memory: 64M
+
+  # Mock server for testing without real Spring Boot apps
+  mock:
+    image: jiin724/pondy:latest
+    container_name: pondy-mock
+    restart: unless-stopped
+    command: ["mock", "-port", "9090", "-max", "20"]
+    ports:
+      - "9090:9090"
+    environment:
+      - TZ=Asia/Seoul
+    profiles:
+      - mock
+      - demo
+
+  # Demo mode: runs both pondy and mock server together
+  pondy-demo:
+    image: jiin724/pondy:latest
+    container_name: pondy-demo
+    restart: unless-stopped
+    command: ["both", "-config", "/app/config.yaml"]
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - ./config.mock.yaml:/app/config.yaml:ro
+      - pondy-data:/app/data
+    environment:
+      - TZ=Asia/Seoul
+      - MOCK_PORT=9090
+      - MOCK_MAX_CONNECTIONS=20
+    profiles:
+      - demo
+
+volumes:
+  pondy-data:
+    driver: local

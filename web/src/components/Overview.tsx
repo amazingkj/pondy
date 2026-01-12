@@ -191,7 +191,7 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
               Drag cards to reorder
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
             {targetOrder.map((targetName) => {
               const t = data.targets.find((target) => target.name === targetName);
               if (!t) return null;
@@ -221,6 +221,10 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
                   onClick={() => setSelectedTarget(isSelected ? null : t.name)}
                   style={{
                     padding: '12px',
+                    width: '180px',
+                    minHeight: '120px',
+                    boxSizing: 'border-box',
+                    flexShrink: 0,
                     backgroundColor: isDragOver
                       ? (theme === 'dark' ? '#2d4a6f' : '#bfdbfe')
                       : isSelected
@@ -229,10 +233,9 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
                     borderRadius: '8px',
                     borderLeft: `3px solid ${statusColor}`,
                     cursor: isDragging ? 'grabbing' : 'grab',
-                    transition: 'background-color 0.15s, opacity 0.15s, transform 0.15s',
+                    transition: 'background-color 0.15s, opacity 0.15s',
                     outline: isSelected ? '2px solid #3b82f6' : isDragOver ? '2px dashed #3b82f6' : 'none',
                     opacity: isDragging ? 0.5 : isOffline ? 0.6 : 1,
-                    transform: isDragOver ? 'scale(1.02)' : 'scale(1)',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -548,8 +551,8 @@ function TargetDetailPanel({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: colors.textSecondary }}>
                 Loading...
               </div>
-            ) : history && history.datapoints.length > 0 ? (
-              <TrendChart data={history.datapoints} height={200} />
+            ) : history?.datapoints && history.datapoints.length > 0 ? (
+              <TrendChart data={history.datapoints} height={200} targetName={targetName} />
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: colors.textSecondary }}>
                 No data available
@@ -564,8 +567,8 @@ function TargetDetailPanel({
         <div>
           {historyLoading && !history ? (
             <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary }}>Loading...</div>
-          ) : history && history.datapoints.length > 0 ? (
-            <HeatmapChart data={history.datapoints} />
+          ) : history?.datapoints && history.datapoints.length > 0 ? (
+            <HeatmapChart data={history.datapoints} targetName={targetName} />
           ) : (
             <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary }}>No data available</div>
           )}
@@ -599,11 +602,11 @@ function TargetDetailPanel({
                   <div style={{ marginTop: '6px', fontSize: '11px', color: colors.text }}>{peakTime.summary.recommendation}</div>
                 )}
               </div>
-              {peakTime.peak_hours && peakTime.peak_hours.length > 0 && (
+              {peakTime.peak_hours && Array.isArray(peakTime.peak_hours) && peakTime.peak_hours.length > 0 && (
                 <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                  {peakTime.peak_hours.map((h) => (
-                    <span key={h.hour} style={{ padding: '3px 6px', backgroundColor: '#fee2e2', color: '#991b1b', borderRadius: '4px', fontSize: '10px' }}>
-                      {h.hour}:00 ({(h.avg_usage ?? 0).toFixed(0)}%)
+                  {peakTime.peak_hours.map((h, idx) => (
+                    <span key={h?.hour ?? idx} style={{ padding: '3px 6px', backgroundColor: '#fee2e2', color: '#991b1b', borderRadius: '4px', fontSize: '10px' }}>
+                      {h?.hour ?? 0}:00 ({(h?.avg_usage ?? 0).toFixed(0)}%)
                     </span>
                   ))}
                 </div>
@@ -620,7 +623,7 @@ function TargetDetailPanel({
         <div>
           {anomaliesLoading ? (
             <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary }}>Detecting...</div>
-          ) : anomalies && anomalies.statistics ? (
+          ) : anomalies ? (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                 <span
@@ -636,16 +639,16 @@ function TargetDetailPanel({
                   {(anomalies.risk_level || 'normal').toUpperCase()}
                 </span>
                 <span style={{ fontSize: '11px', color: colors.textSecondary }}>
-                  {anomalies.statistics.anomaly_count || 0} anomalies ({(anomalies.statistics.anomaly_percent ?? 0).toFixed(1)}%)
+                  {anomalies.statistics?.anomaly_count || 0} anomalies ({(anomalies.statistics?.anomaly_percent ?? 0).toFixed(1)}%)
                 </span>
               </div>
               <div style={{ padding: '8px', backgroundColor: colors.bgCard, borderRadius: '6px', marginBottom: '8px', fontSize: '11px' }}>
                 <span style={{ color: colors.textSecondary }}>Mean: </span>
-                <span style={{ color: colors.text }}>{(anomalies.statistics.mean_usage ?? 0).toFixed(1)}%</span>
+                <span style={{ color: colors.text }}>{(anomalies.statistics?.mean_usage ?? 0).toFixed(1)}%</span>
                 <span style={{ color: colors.textSecondary, marginLeft: '10px' }}>Std Dev: </span>
-                <span style={{ color: colors.text }}>{(anomalies.statistics.std_deviation ?? 0).toFixed(1)}</span>
+                <span style={{ color: colors.text }}>{(anomalies.statistics?.std_deviation ?? 0).toFixed(1)}</span>
               </div>
-              {anomalies.anomalies && anomalies.anomalies.length > 0 ? (
+              {anomalies.anomalies && Array.isArray(anomalies.anomalies) && anomalies.anomalies.length > 0 ? (
                 <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
                   {anomalies.anomalies.slice(0, 5).map((a, i) => (
                     <div
@@ -653,15 +656,15 @@ function TargetDetailPanel({
                       style={{
                         padding: '8px',
                         marginBottom: '4px',
-                        backgroundColor: a.severity === 'critical' ? '#fee2e2' : '#fef3c7',
+                        backgroundColor: a?.severity === 'critical' ? '#fee2e2' : '#fef3c7',
                         borderRadius: '6px',
                         fontSize: '11px',
                       }}
                     >
-                      <div style={{ fontWeight: 600, color: a.severity === 'critical' ? '#991b1b' : '#92400e' }}>
-                        {(a.type || '').replace(/_/g, ' ')}
+                      <div style={{ fontWeight: 600, color: a?.severity === 'critical' ? '#991b1b' : '#92400e' }}>
+                        {(a?.type || '').replace(/_/g, ' ')}
                       </div>
-                      <div style={{ color: '#374151' }}>{a.message}</div>
+                      <div style={{ color: '#374151' }}>{a?.message || ''}</div>
                     </div>
                   ))}
                   {anomalies.anomalies.length > 5 && (
@@ -706,7 +709,7 @@ function TargetDetailPanel({
           </div>
           {comparisonLoading ? (
             <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary }}>Comparing...</div>
-          ) : comparison ? (
+          ) : comparison && comparison.current_period && comparison.previous_period ? (
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '10px' }}>
                 <div style={{ padding: '10px', backgroundColor: colors.bgCard, borderRadius: '6px' }}>
@@ -732,15 +735,15 @@ function TargetDetailPanel({
                 style={{
                   padding: '8px',
                   borderRadius: '6px',
-                  backgroundColor: comparison.changes.trend === 'improving' ? '#dcfce7' : comparison.changes.trend === 'degrading' ? '#fee2e2' : colors.bgCard,
+                  backgroundColor: comparison.changes?.trend === 'improving' ? '#dcfce7' : comparison.changes?.trend === 'degrading' ? '#fee2e2' : colors.bgCard,
                   fontSize: '12px',
                   fontWeight: 600,
-                  color: comparison.changes.trend === 'improving' ? '#166534' : comparison.changes.trend === 'degrading' ? '#991b1b' : colors.text,
+                  color: comparison.changes?.trend === 'improving' ? '#166534' : comparison.changes?.trend === 'degrading' ? '#991b1b' : colors.text,
                 }}
               >
-                {comparison.changes.trend === 'improving' ? '↓ Improving' : comparison.changes.trend === 'degrading' ? '↑ Degrading' : '→ Stable'}
+                {comparison.changes?.trend === 'improving' ? '↓ Improving' : comparison.changes?.trend === 'degrading' ? '↑ Degrading' : '→ Stable'}
                 <span style={{ fontWeight: 400, marginLeft: '8px', fontSize: '11px' }}>
-                  ({comparison.changes.avg_usage_change >= 0 ? '+' : ''}{(comparison.changes.avg_usage_change ?? 0).toFixed(1)}%)
+                  ({(comparison.changes?.avg_usage_change ?? 0) >= 0 ? '+' : ''}{(comparison.changes?.avg_usage_change ?? 0).toFixed(1)}%)
                 </span>
               </div>
             </div>
@@ -755,10 +758,10 @@ function TargetDetailPanel({
         <div>
           {recsLoading ? (
             <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary }}>Analyzing...</div>
-          ) : recs && recs.recommendations ? (
+          ) : recs && recs.recommendations && Array.isArray(recs.recommendations) ? (
             <div>
               <div style={{ marginBottom: '8px', fontSize: '11px', color: colors.textSecondary }}>
-                Analyzed {recs.data_points} points | Peak: {recs.stats.peak_usage}%
+                Analyzed {recs.data_points || 0} points | Peak: {recs.stats?.peak_usage ?? 0}%
               </div>
               {recs.recommendations.map((rec, i) => (
                 <div
@@ -766,21 +769,21 @@ function TargetDetailPanel({
                   style={{
                     padding: '8px',
                     marginBottom: '4px',
-                    backgroundColor: rec.severity === 'critical' ? '#fee2e2' : rec.severity === 'warning' ? '#fef3c7' : '#dbeafe',
+                    backgroundColor: rec?.severity === 'critical' ? '#fee2e2' : rec?.severity === 'warning' ? '#fef3c7' : '#dbeafe',
                     borderRadius: '6px',
                     fontSize: '11px',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 600, color: rec.severity === 'critical' ? '#991b1b' : rec.severity === 'warning' ? '#92400e' : '#1e40af' }}>
-                      {rec.type}
+                    <span style={{ fontWeight: 600, color: rec?.severity === 'critical' ? '#991b1b' : rec?.severity === 'warning' ? '#92400e' : '#1e40af' }}>
+                      {rec?.type || 'Unknown'}
                     </span>
-                    <span style={{ fontSize: '10px', textTransform: 'uppercase' }}>{rec.severity}</span>
+                    <span style={{ fontSize: '10px', textTransform: 'uppercase' }}>{rec?.severity || ''}</span>
                   </div>
-                  <div style={{ color: '#374151' }}>{rec.reason}</div>
-                  {rec.current !== rec.recommended && (
+                  <div style={{ color: '#374151' }}>{rec?.reason || ''}</div>
+                  {rec?.current !== rec?.recommended && (
                     <div style={{ color: '#6b7280', marginTop: '2px' }}>
-                      {rec.current} → <strong>{rec.recommended}</strong>
+                      {rec?.current || ''} → <strong>{rec?.recommended || ''}</strong>
                     </div>
                   )}
                 </div>
@@ -810,13 +813,13 @@ function TargetDetailPanel({
                     color: leaks.leak_risk === 'high' ? '#991b1b' : leaks.leak_risk === 'medium' ? '#92400e' : leaks.leak_risk === 'low' ? '#1e40af' : '#166534',
                   }}
                 >
-                  Risk: {leaks.leak_risk.toUpperCase()}
+                  Risk: {(leaks.leak_risk || 'none').toUpperCase()}
                 </span>
                 <span style={{ fontSize: '11px', color: colors.textSecondary }}>
-                  Health: {leaks.health_score >= 0 ? `${leaks.health_score}/100` : 'N/A'}
+                  Health: {leaks.health_score != null && leaks.health_score >= 0 ? `${leaks.health_score}/100` : 'N/A'}
                 </span>
               </div>
-              {leaks.alerts && leaks.alerts.length > 0 ? (
+              {leaks.alerts && Array.isArray(leaks.alerts) && leaks.alerts.length > 0 ? (
                 <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
                   {leaks.alerts.map((alert, i) => (
                     <div
@@ -824,15 +827,15 @@ function TargetDetailPanel({
                       style={{
                         padding: '8px',
                         marginBottom: '4px',
-                        backgroundColor: alert.severity === 'critical' ? '#fee2e2' : '#fef3c7',
+                        backgroundColor: alert?.severity === 'critical' ? '#fee2e2' : '#fef3c7',
                         borderRadius: '6px',
                         fontSize: '11px',
                       }}
                     >
-                      <div style={{ fontWeight: 600, color: alert.severity === 'critical' ? '#991b1b' : '#92400e' }}>
-                        {alert.type.replace(/_/g, ' ')}
+                      <div style={{ fontWeight: 600, color: alert?.severity === 'critical' ? '#991b1b' : '#92400e' }}>
+                        {(alert?.type || '').replace(/_/g, ' ')}
                       </div>
-                      <div style={{ color: '#374151' }}>{alert.message}</div>
+                      <div style={{ color: '#374151' }}>{alert?.message || ''}</div>
                     </div>
                   ))}
                 </div>

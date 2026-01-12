@@ -16,6 +16,7 @@ interface ThemeColors {
   textSecondary: string;
   border: string;
   borderLight: string;
+  accent: string;
 }
 
 const lightColors: ThemeColors = {
@@ -26,6 +27,7 @@ const lightColors: ThemeColors = {
   textSecondary: '#6b7280',
   border: '#e5e7eb',
   borderLight: '#f3f4f6',
+  accent: '#2563eb',
 };
 
 const darkColors: ThemeColors = {
@@ -36,6 +38,7 @@ const darkColors: ThemeColors = {
   textSecondary: '#9ca3af',
   border: '#374151',
   borderLight: '#374151',
+  accent: '#60a5fa',
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);

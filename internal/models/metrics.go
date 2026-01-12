@@ -31,13 +31,20 @@ type PoolMetrics struct {
 	ThreadsLive int     `json:"threads_live"`
 	CpuUsage    float64 `json:"cpu_usage"` // 0.0 ~ 1.0
 
+	// GC metrics
+	GcCount     int64   `json:"gc_count"`      // total GC count
+	GcTime      float64 `json:"gc_time"`       // total GC time in seconds
+	YoungGcCount int64  `json:"young_gc_count"` // young gen GC count
+	OldGcCount   int64  `json:"old_gc_count"`   // old gen GC count
+
 	Timestamp time.Time `json:"timestamp"`
 }
 
 // TargetStatus represents current status of a monitoring target
 type TargetStatus struct {
 	Name      string           `json:"name"`
-	Status    string           `json:"status"` // healthy, unhealthy, unknown
+	Group     string           `json:"group,omitempty"` // Environment group: dev, staging, prod, etc.
+	Status    string           `json:"status"`          // healthy, unhealthy, unknown
 	Current   *PoolMetrics     `json:"current,omitempty"`
 	Instances []InstanceStatus `json:"instances,omitempty"`
 }

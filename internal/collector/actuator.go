@@ -176,6 +176,19 @@ func (c *ActuatorCollector) Collect() (*models.PoolMetrics, error) {
 		}(jm)
 	}
 
+	// Fetch GC metrics in parallel
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		count, time, youngCount, oldCount := c.fetchGcMetrics()
+		mu.Lock()
+		metrics.GcCount = count
+		metrics.GcTime = time
+		metrics.YoungGcCount = youngCount
+		metrics.OldGcCount = oldCount
+		mu.Unlock()
+	}()
+
 	wg.Wait()
 
 	// Process HikariCP results
@@ -289,4 +302,69 @@ func (c *ActuatorCollector) fetchMetricURL(url string) (float64, error) {
 	}
 
 	return 0, fmt.Errorf("no measurements found")
+}
+
+func (c *ActuatorCollector) fetchGcMetrics() (gcCount int64, gcTime float64, youngGcCount int64, oldGcCount int64) {
+	// Fetch jvm.gc.pause which contains COUNT and TOTAL_TIME statistics
+	url := fmt.Sprintf("%s/jvm.gc.pause", c.endpoint)
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return 0, 0, 0, 0
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, 0, 0, 0
+	}
+
+	var result ActuatorMetricResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, 0, 0, 0
+	}
+
+	// Extract COUNT and TOTAL_TIME from measurements
+	for _, m := range result.Measurements {
+		switch m.Statistic {
+		case "COUNT":
+			gcCount = int64(m.Value)
+		case "TOTAL_TIME":
+			gcTime = m.Value
+		}
+	}
+
+	// Try to get young/minor GC count
+	youngUrl := fmt.Sprintf("%s/jvm.gc.pause?tag=action:end of minor GC", c.endpoint)
+	if youngResp, err := c.client.Get(youngUrl); err == nil {
+		defer youngResp.Body.Close()
+		if youngResp.StatusCode == http.StatusOK {
+			var youngResult ActuatorMetricResponse
+			if json.NewDecoder(youngResp.Body).Decode(&youngResult) == nil {
+				for _, m := range youngResult.Measurements {
+					if m.Statistic == "COUNT" {
+						youngGcCount = int64(m.Value)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Try to get old/major GC count
+	oldUrl := fmt.Sprintf("%s/jvm.gc.pause?tag=action:end of major GC", c.endpoint)
+	if oldResp, err := c.client.Get(oldUrl); err == nil {
+		defer oldResp.Body.Close()
+		if oldResp.StatusCode == http.StatusOK {
+			var oldResult ActuatorMetricResponse
+			if json.NewDecoder(oldResp.Body).Decode(&oldResult) == nil {
+				for _, m := range oldResult.Measurements {
+					if m.Statistic == "COUNT" {
+						oldGcCount = int64(m.Value)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return gcCount, gcTime, youngGcCount, oldGcCount
 }

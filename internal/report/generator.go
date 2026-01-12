@@ -36,13 +36,18 @@ type ReportSummary struct {
 }
 
 // BuildReportData builds report data from metrics and analysis results
+// loc is the timezone for displaying timestamps (if nil, uses UTC)
 func BuildReportData(targetName string, rangeStr string, metrics []models.PoolMetrics,
 	recs *analyzer.AnalysisResult, leaks *analyzer.LeakAnalysisResult,
-	anomalies *analyzer.AnomalyResult, peakTime *analyzer.PeakTimeResult) ReportData {
+	anomalies *analyzer.AnomalyResult, peakTime *analyzer.PeakTimeResult, loc *time.Location) ReportData {
+
+	if loc == nil {
+		loc = time.UTC
+	}
 
 	data := &ReportData{
 		TargetName:  targetName,
-		GeneratedAt: time.Now(),
+		GeneratedAt: time.Now().In(loc),
 		Range:       rangeStr,
 		DataPoints:  len(metrics),
 	}
@@ -92,9 +97,13 @@ func BuildReportData(targetName string, rangeStr string, metrics []models.PoolMe
 		data.Summary.RiskLevel = leaks.LeakRisk
 	}
 
-	// Add anomalies
-	if anomalies != nil {
-		data.Anomalies = anomalies.Anomalies
+	// Add anomalies (convert timestamps to configured timezone)
+	if anomalies != nil && len(anomalies.Anomalies) > 0 {
+		data.Anomalies = make([]analyzer.Anomaly, len(anomalies.Anomalies))
+		for i, a := range anomalies.Anomalies {
+			data.Anomalies[i] = a
+			data.Anomalies[i].Timestamp = a.Timestamp.In(loc)
+		}
 	}
 
 	// Add peak time
@@ -128,9 +137,13 @@ type CombinedReportData struct {
 }
 
 // GenerateCombinedHTMLReport generates a combined HTML report for multiple targets
-func GenerateCombinedHTMLReport(reports []ReportData, rangeStr string) ([]byte, error) {
+// loc is the timezone for displaying timestamps (if nil, uses UTC)
+func GenerateCombinedHTMLReport(reports []ReportData, rangeStr string, loc *time.Location) ([]byte, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
 	data := CombinedReportData{
-		GeneratedAt: time.Now(),
+		GeneratedAt: time.Now().In(loc),
 		Range:       rangeStr,
 		Reports:     reports,
 	}

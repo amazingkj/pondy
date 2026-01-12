@@ -2,7 +2,7 @@ export interface PoolMetrics {
   id: number;
   target_name: string;
   instance_name: string;
-   status: string;
+  status: string;
   active: number;
   idle: number;
   pending: number;
@@ -15,6 +15,11 @@ export interface PoolMetrics {
   non_heap_used: number;
   threads_live: number;
   cpu_usage: number;
+  // GC metrics
+  gc_count: number;
+  gc_time: number;
+  young_gc_count: number;
+  old_gc_count: number;
   timestamp: string;
 }
 
@@ -26,6 +31,7 @@ export interface InstanceStatus {
 
 export interface TargetStatus {
   name: string;
+  group?: string;
   status: 'healthy' | 'warning' | 'critical' | 'unknown';
   current?: PoolMetrics;
   instances?: InstanceStatus[];
@@ -33,6 +39,7 @@ export interface TargetStatus {
 
 export interface TargetsResponse {
   targets: TargetStatus[];
+  groups?: string[];
 }
 
 export interface HistoryResponse {

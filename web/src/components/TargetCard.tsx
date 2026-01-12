@@ -1,15 +1,19 @@
-import { useState, memo } from 'react';
+import { useState, memo, useMemo, Suspense, lazy } from 'react';
 import type { TargetStatus } from '../types/metrics';
 import { useHistory } from '../hooks/useMetrics';
 import { PoolGauge } from './PoolGauge';
-import { TrendChart } from './TrendChart';
-import { HeatmapChart } from './HeatmapChart';
 import type { GlobalView } from './Dashboard';
 import { useTheme } from '../context/ThemeContext';
+import { useLazyLoad, useDebouncedValue } from '../hooks/useLazyLoad';
+
+// Lazy load chart components
+const TrendChart = lazy(() => import('./TrendChart').then(m => ({ default: m.TrendChart })));
+const HeatmapChart = lazy(() => import('./HeatmapChart').then(m => ({ default: m.HeatmapChart })));
 
 interface TargetCardProps {
   target: TargetStatus;
   globalView?: GlobalView;
+  renderIndex?: number;
 }
 
 const statusColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -40,14 +44,46 @@ function getCpuColor(usage: number): string {
   return '#22c55e';
 }
 
-export const TargetCard = memo(function TargetCard({ target, globalView }: TargetCardProps) {
+// Chart loading placeholder
+function ChartPlaceholder({ height = 160 }: { height?: number }) {
+  const { colors } = useTheme();
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height,
+        color: colors.textSecondary,
+        fontSize: '12px',
+      }}
+    >
+      Loading chart...
+    </div>
+  );
+}
+
+export const TargetCard = memo(function TargetCard({ target, globalView, renderIndex = 0 }: TargetCardProps) {
   const [range, setRange] = useState('1h');
   const { theme, colors: themeColors } = useTheme();
 
-  // Only fetch history when globalView requires it
-  const showTrend = globalView === 'trend';
-  const showHeatmap = globalView === 'heatmap';
-  const needHistory = showTrend || showHeatmap;
+  // Debounce globalView changes to prevent rapid toggle issues
+  const debouncedGlobalView = useDebouncedValue(globalView, 50);
+
+  // Calculate staggered delay based on render index (50ms per card, max 400ms)
+  const staggerDelay = useMemo(() => Math.min(renderIndex * 50, 400), [renderIndex]);
+
+  // Lazy load chart section with staggered delay
+  const { elementRef: chartRef, shouldLoad: shouldLoadChart } = useLazyLoad({
+    enabled: debouncedGlobalView === 'trend' || debouncedGlobalView === 'heatmap',
+    delay: staggerDelay,
+    rootMargin: '100px',
+  });
+
+  // Only fetch history when globalView requires it AND lazy load is ready
+  const showTrend = debouncedGlobalView === 'trend';
+  const showHeatmap = debouncedGlobalView === 'heatmap';
+  const needHistory = (showTrend || showHeatmap) && shouldLoadChart;
   const { data: history, loading: historyLoading } = useHistory(
     needHistory ? target.name : '',
     showHeatmap ? '24h' : range
@@ -73,7 +109,24 @@ export const TargetCard = memo(function TargetCard({ target, globalView }: Targe
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: themeColors.text }}>{target.name}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: themeColors.text }}>{target.name}</h3>
+            {target.group && (
+              <span
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  fontWeight: 500,
+                  backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
+                  color: theme === 'dark' ? '#9ca3af' : '#6b7280',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {target.group}
+              </span>
+            )}
+          </div>
           <span
             style={{
               display: 'inline-block',
@@ -194,17 +247,35 @@ export const TargetCard = memo(function TargetCard({ target, globalView }: Targe
                 )}
               </>
             )}
+
+            {/* GC Metrics */}
+            {(current.gc_count > 0 || current.gc_time > 0) && (
+              <>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#f97316' }}>{current.gc_count}</div>
+                  <div style={{ fontSize: '10px', color: themeColors.textSecondary }}>GC Count</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#f97316' }}>
+                    {current.gc_time < 1 ? `${(current.gc_time * 1000).toFixed(0)}ms` : `${current.gc_time.toFixed(2)}s`}
+                  </div>
+                  <div style={{ fontSize: '10px', color: themeColors.textSecondary }}>GC Time</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
       {/* Global View: Trend */}
       <div
+        ref={showTrend ? chartRef : undefined}
         style={{
           marginTop: showTrend ? '12px' : '0',
           maxHeight: showTrend ? '200px' : '0',
           overflow: 'hidden',
-          transition: 'max-height 0.2s ease-out, margin-top 0.2s ease-out',
+          transition: 'max-height 0.3s ease-out, margin-top 0.3s ease-out, opacity 0.3s ease-out',
+          opacity: showTrend ? 1 : 0,
         }}
       >
         <div style={{ marginBottom: '8px', display: 'flex', gap: '4px' }}>
@@ -227,12 +298,16 @@ export const TargetCard = memo(function TargetCard({ target, globalView }: Targe
           ))}
         </div>
         <div style={{ height: '160px' }}>
-          {historyLoading && !history ? (
+          {!shouldLoadChart ? (
+            <ChartPlaceholder height={160} />
+          ) : historyLoading && !history ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: themeColors.textSecondary, fontSize: '12px' }}>
               Loading...
             </div>
-          ) : history && history.datapoints.length > 0 ? (
-            <TrendChart data={history.datapoints} height={160} />
+          ) : history?.datapoints && history.datapoints.length > 0 ? (
+            <Suspense fallback={<ChartPlaceholder height={160} />}>
+              <TrendChart data={history.datapoints} height={160} targetName={target.name} />
+            </Suspense>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: themeColors.textSecondary, fontSize: '12px' }}>
               No data
@@ -243,19 +318,25 @@ export const TargetCard = memo(function TargetCard({ target, globalView }: Targe
 
       {/* Global View: Heatmap */}
       <div
+        ref={showHeatmap ? chartRef : undefined}
         style={{
           marginTop: showHeatmap ? '12px' : '0',
           maxHeight: showHeatmap ? '150px' : '0',
           overflow: 'hidden',
-          transition: 'max-height 0.2s ease-out, margin-top 0.2s ease-out',
+          transition: 'max-height 0.3s ease-out, margin-top 0.3s ease-out, opacity 0.3s ease-out',
+          opacity: showHeatmap ? 1 : 0,
         }}
       >
-        {historyLoading && !history ? (
+        {!shouldLoadChart ? (
+          <ChartPlaceholder height={120} />
+        ) : historyLoading && !history ? (
           <div style={{ textAlign: 'center', padding: '20px', color: themeColors.textSecondary, fontSize: '12px' }}>
             Loading...
           </div>
-        ) : history && history.datapoints.length > 0 ? (
-          <HeatmapChart data={history.datapoints} />
+        ) : history?.datapoints && history.datapoints.length > 0 ? (
+          <Suspense fallback={<ChartPlaceholder height={120} />}>
+            <HeatmapChart data={history.datapoints} targetName={target.name} />
+          </Suspense>
         ) : (
           <div style={{ textAlign: 'center', padding: '20px', color: themeColors.textSecondary, fontSize: '12px' }}>
             No data

@@ -4,12 +4,42 @@ server:
 storage:
   path: ./data/pondy.db
 
+# Logging configuration
+logging:
+  level: info    # debug, info, warn, error
+  format: text   # text, json
+
+# Data retention settings
+retention:
+  max_age: 7d           # Keep data for 7 days (supports: 1d, 7d, 30d, etc.)
+  cleanup_interval: 1h  # Run cleanup every hour
+
 # Timezone for chart display (default: Local)
 # Examples: "Asia/Seoul", "Asia/Tokyo", "UTC", "Local"
 timezone: Asia/Seoul
 
 targets:
-  - name: mock-service
+  # Simple single-instance target
+  - name: user-service
     type: actuator
-    endpoint: http://localhost:9090/actuator/metrics
+    endpoint: http://user-service:8080/actuator/metrics
     interval: 10s
+    group: prod  # Environment group: dev, staging, prod, etc.
+
+  # Multi-instance target (load-balanced)
+  - name: order-service
+    type: actuator
+    interval: 10s
+    group: prod
+    instances:
+      - id: order-1
+        endpoint: http://order-1:8080/actuator/metrics
+      - id: order-2
+        endpoint: http://order-2:8080/actuator/metrics
+
+  # Development environment
+  - name: dev-api
+    type: actuator
+    endpoint: http://dev-api:8080/actuator/metrics
+    interval: 30s
+    group: dev

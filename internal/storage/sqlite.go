@@ -65,6 +65,10 @@ func (s *SQLiteStorage) migrate() error {
 		non_heap_used INTEGER DEFAULT 0,
 		threads_live INTEGER DEFAULT 0,
 		cpu_usage REAL DEFAULT 0,
+		gc_count INTEGER DEFAULT 0,
+		gc_time REAL DEFAULT 0,
+		young_gc_count INTEGER DEFAULT 0,
+		old_gc_count INTEGER DEFAULT 0,
 		timestamp DATETIME NOT NULL
 	);
 
@@ -100,6 +104,10 @@ func (s *SQLiteStorage) runMigration() {
 		{"non_heap_used", "INTEGER DEFAULT 0"},
 		{"threads_live", "INTEGER DEFAULT 0"},
 		{"cpu_usage", "REAL DEFAULT 0"},
+		{"gc_count", "INTEGER DEFAULT 0"},
+		{"gc_time", "REAL DEFAULT 0"},
+		{"young_gc_count", "INTEGER DEFAULT 0"},
+		{"old_gc_count", "INTEGER DEFAULT 0"},
 	}
 
 	for _, col := range columns {
@@ -135,8 +143,8 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 
 	query := `
 	INSERT INTO pool_metrics (target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query,
 		metrics.TargetName,
@@ -153,6 +161,10 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 		metrics.NonHeapUsed,
 		metrics.ThreadsLive,
 		metrics.CpuUsage,
+		metrics.GcCount,
+		metrics.GcTime,
+		metrics.YoungGcCount,
+		metrics.OldGcCount,
 		metrics.Timestamp,
 	)
 	if err != nil {
@@ -169,7 +181,7 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ?
 	ORDER BY timestamp DESC
@@ -179,7 +191,7 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 
 	var m models.PoolMetrics
 	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp)
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -192,7 +204,7 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ?
 	ORDER BY timestamp DESC
@@ -202,7 +214,7 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 
 	var m models.PoolMetrics
 	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp)
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -215,7 +227,7 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT p.id, p.target_name, p.instance_name, p.status, p.active, p.idle, p.pending, p.max, p.timeout, p.acquire_p99,
-		p.heap_used, p.heap_max, p.non_heap_used, p.threads_live, p.cpu_usage, p.timestamp
+		p.heap_used, p.heap_max, p.non_heap_used, p.threads_live, p.cpu_usage, p.gc_count, p.gc_time, p.young_gc_count, p.old_gc_count, p.timestamp
 	FROM pool_metrics p
 	INNER JOIN (
 		SELECT instance_name, MAX(timestamp) as max_ts
@@ -236,7 +248,7 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -247,7 +259,7 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -262,7 +274,7 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -273,7 +285,7 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, timestamp
+		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -288,7 +300,7 @@ func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, fr
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)

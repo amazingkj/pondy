@@ -1,12 +1,15 @@
 import { Dashboard } from './components/Dashboard'
 import { ThemeProvider } from './context/ThemeContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './index.css'
 
 function App() {
   return (
-    <ThemeProvider>
-      <Dashboard />
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <Dashboard />
+      </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 

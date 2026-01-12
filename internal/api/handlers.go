@@ -22,28 +22,48 @@ type cacheEntry struct {
 }
 
 type Handler struct {
-	cfg          *config.Config
+	cfgMgr       *config.Manager
 	store        storage.Storage
 	cache        *cacheEntry
 	cacheMu      sync.RWMutex
 	cacheTTL     time.Duration
 }
 
-func NewHandler(cfg *config.Config, store storage.Storage) *Handler {
-	return &Handler{
-		cfg:      cfg,
+func NewHandler(cfgMgr *config.Manager, store storage.Storage) *Handler {
+	h := &Handler{
+		cfgMgr:   cfgMgr,
 		store:    store,
 		cacheTTL: 2 * time.Second, // 2 second cache TTL
 	}
+
+	// Invalidate cache when config reloads
+	cfgMgr.OnReload(func(*config.Config) {
+		h.InvalidateCache()
+	})
+
+	return h
+}
+
+// cfg returns the current config (for hot reload support)
+func (h *Handler) cfg() *config.Config {
+	return h.cfgMgr.Get()
+}
+
+// InvalidateCache clears the targets cache
+func (h *Handler) InvalidateCache() {
+	h.cacheMu.Lock()
+	h.cache = nil
+	h.cacheMu.Unlock()
 }
 
 type TargetsResponse struct {
 	Targets []models.TargetStatus `json:"targets"`
+	Groups  []string              `json:"groups,omitempty"`
 }
 
 // GetSettings returns client-side settings like timezone
 func (h *Handler) GetSettings(c *gin.Context) {
-	timezone := h.cfg.Timezone
+	timezone := h.cfg().Timezone
 	if timezone == "" {
 		timezone = "Local"
 	}
@@ -67,9 +87,10 @@ func (h *Handler) GetTargets(c *gin.Context) {
 	var targets []models.TargetStatus
 
 	// Get configured targets
-	for _, t := range h.cfg.Targets {
+	for _, t := range h.cfg().Targets {
 		status := models.TargetStatus{
 			Name:   t.Name,
+			Group:  t.Group,
 			Status: "unknown",
 		}
 
@@ -164,7 +185,19 @@ func (h *Handler) GetTargets(c *gin.Context) {
 		targets = append(targets, status)
 	}
 
-	response := TargetsResponse{Targets: targets}
+	// Collect unique groups
+	groupSet := make(map[string]bool)
+	for _, t := range h.cfg().Targets {
+		if t.Group != "" {
+			groupSet[t.Group] = true
+		}
+	}
+	var groups []string
+	for g := range groupSet {
+		groups = append(groups, g)
+	}
+
+	response := TargetsResponse{Targets: targets, Groups: groups}
 
 	// Update cache
 	h.cacheMu.Lock()
@@ -260,7 +293,7 @@ func (h *Handler) GetRecommendations(c *gin.Context) {
 		return
 	}
 
-	result := analyzer.Analyze(datapoints)
+	result := analyzer.Analyze(datapoints, h.cfg().GetLocation())
 	c.JSON(http.StatusOK, result)
 }
 
@@ -287,7 +320,7 @@ func (h *Handler) DetectLeaks(c *gin.Context) {
 		return
 	}
 
-	result := analyzer.DetectLeaks(datapoints)
+	result := analyzer.DetectLeaks(datapoints, h.cfg().GetLocation())
 	c.JSON(http.StatusOK, result)
 }
 
@@ -309,7 +342,8 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("%s_%s.csv", name, time.Now().Format("20060102_150405"))
+	loc := h.cfg().GetLocation()
+	filename := fmt.Sprintf("%s_%s.csv", name, time.Now().In(loc).Format("20060102_150405"))
 	c.Header("Content-Type", "text/csv")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 
@@ -322,7 +356,7 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 	// Write data
 	for _, d := range datapoints {
 		writer.Write([]string{
-			d.Timestamp.Format(time.RFC3339),
+			d.Timestamp.In(loc).Format(time.RFC3339),
 			d.Status,
 			fmt.Sprintf("%d", d.Active),
 			fmt.Sprintf("%d", d.Idle),
@@ -362,7 +396,7 @@ func (h *Handler) GetPeakTime(c *gin.Context) {
 		return
 	}
 
-	result := analyzer.AnalyzePeakTime(name, datapoints)
+	result := analyzer.AnalyzePeakTime(name, datapoints, h.cfg().GetLocation())
 	c.JSON(http.StatusOK, result)
 }
 
@@ -389,7 +423,7 @@ func (h *Handler) DetectAnomalies(c *gin.Context) {
 		return
 	}
 
-	result := analyzer.DetectAnomalies(name, datapoints)
+	result := analyzer.DetectAnomalies(name, datapoints, h.cfg().GetLocation())
 	c.JSON(http.StatusOK, result)
 }
 
@@ -433,7 +467,7 @@ func (h *Handler) ComparePeriods(c *gin.Context) {
 		return
 	}
 
-	result := analyzer.ComparePeriods(name, currentMetrics, previousMetrics, period)
+	result := analyzer.ComparePeriods(name, currentMetrics, previousMetrics, period, h.cfg().GetLocation())
 	c.JSON(http.StatusOK, result)
 }
 
@@ -480,13 +514,13 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 	}
 
 	// Run analysis
-	recs := analyzer.Analyze(datapoints)
-	leaks := analyzer.DetectLeaks(datapoints)
-	anomalies := analyzer.DetectAnomalies(name, datapoints)
-	peakTime := analyzer.AnalyzePeakTime(name, datapoints)
+	recs := analyzer.Analyze(datapoints, h.cfg().GetLocation())
+	leaks := analyzer.DetectLeaks(datapoints, h.cfg().GetLocation())
+	anomalies := analyzer.DetectAnomalies(name, datapoints, h.cfg().GetLocation())
+	peakTime := analyzer.AnalyzePeakTime(name, datapoints, h.cfg().GetLocation())
 
 	// Build report data
-	reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime)
+	reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime, h.cfg().GetLocation())
 
 	// Generate HTML report
 	htmlBytes, err := report.GenerateHTMLReport(&reportData)
@@ -537,12 +571,12 @@ func (h *Handler) GenerateCombinedReport(c *gin.Context) {
 			continue
 		}
 
-		recs := analyzer.Analyze(datapoints)
-		leaks := analyzer.DetectLeaks(datapoints)
-		anomalies := analyzer.DetectAnomalies(name, datapoints)
-		peakTime := analyzer.AnalyzePeakTime(name, datapoints)
+		recs := analyzer.Analyze(datapoints, h.cfg().GetLocation())
+		leaks := analyzer.DetectLeaks(datapoints, h.cfg().GetLocation())
+		anomalies := analyzer.DetectAnomalies(name, datapoints, h.cfg().GetLocation())
+		peakTime := analyzer.AnalyzePeakTime(name, datapoints, h.cfg().GetLocation())
 
-		reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime)
+		reportData := report.BuildReportData(name, rangeParam, datapoints, recs, leaks, anomalies, peakTime, h.cfg().GetLocation())
 		allReports = append(allReports, reportData)
 	}
 
@@ -552,7 +586,7 @@ func (h *Handler) GenerateCombinedReport(c *gin.Context) {
 	}
 
 	// Generate combined HTML report
-	htmlBytes, err := report.GenerateCombinedHTMLReport(allReports, rangeParam)
+	htmlBytes, err := report.GenerateCombinedHTMLReport(allReports, rangeParam, h.cfg().GetLocation())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

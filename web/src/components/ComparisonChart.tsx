@@ -20,7 +20,8 @@ interface ComparisonChartProps {
   metric?: MetricType;
 }
 
-const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+const LIGHT_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+const DARK_COLORS = ['#60a5fa', '#4ade80', '#fbbf24', '#f87171', '#a78bfa', '#f472b6', '#22d3ee', '#a3e635'];
 
 interface HistoryData {
   datapoints: Array<{
@@ -44,8 +45,9 @@ const METRIC_CONFIG: Record<MetricType, { label: string; unit: string; color: st
 };
 
 export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }: ComparisonChartProps) {
-  const { colors } = useTheme();
+  const { theme, colors } = useTheme();
   const { settings } = useSettings();
+  const chartLineColors = theme === 'dark' ? DARK_COLORS : LIGHT_COLORS;
   const timezone = settings?.timezone || 'Local';
   const [data, setData] = useState<{ [key: string]: HistoryData }>({});
   const [loading, setLoading] = useState(true);
@@ -96,7 +98,7 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
   // Only show loading on initial load, use previous data otherwise
   if (loading && initialLoad) {
     return (
-      <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+      <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary }}>
         Loading comparison data...
       </div>
     );
@@ -189,7 +191,7 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
               key={name}
               type="monotone"
               dataKey={name}
-              stroke={COLORS[index % COLORS.length]}
+              stroke={chartLineColors[index % chartLineColors.length]}
               strokeWidth={2}
               dot={false}
               connectNulls

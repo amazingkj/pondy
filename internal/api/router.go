@@ -11,11 +11,11 @@ import (
 	"github.com/jiin/pondy/internal/storage"
 )
 
-func NewRouter(cfg *config.Config, store storage.Storage, webFS embed.FS) *gin.Engine {
+func NewRouter(cfgMgr *config.Manager, store storage.Storage, webFS embed.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	handler := NewHandler(cfg, store)
+	handler := NewHandler(cfgMgr, store)
 
 	api := r.Group("/api")
 	{

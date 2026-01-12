@@ -41,27 +41,32 @@ type PeriodChanges struct {
 }
 
 // ComparePeriods compares metrics between current and previous periods
-func ComparePeriods(targetName string, currentMetrics, previousMetrics []models.PoolMetrics, period string) *PeriodComparisonResult {
+// loc is the timezone for timestamps (if nil, uses UTC)
+func ComparePeriods(targetName string, currentMetrics, previousMetrics []models.PoolMetrics, period string, loc *time.Location) *PeriodComparisonResult {
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	result := &PeriodComparisonResult{
 		TargetName: targetName,
 		Period:     period,
 	}
 
-	result.CurrentPeriod = calculatePeriodStats(currentMetrics)
-	result.PreviousPeriod = calculatePeriodStats(previousMetrics)
+	result.CurrentPeriod = calculatePeriodStats(currentMetrics, loc)
+	result.PreviousPeriod = calculatePeriodStats(previousMetrics, loc)
 	result.Changes = calculateChanges(result.CurrentPeriod, result.PreviousPeriod)
 
 	return result
 }
 
-func calculatePeriodStats(metrics []models.PoolMetrics) PeriodStats {
+func calculatePeriodStats(metrics []models.PoolMetrics, loc *time.Location) PeriodStats {
 	if len(metrics) == 0 {
 		return PeriodStats{}
 	}
 
 	stats := PeriodStats{
-		From:       metrics[0].Timestamp,
-		To:         metrics[len(metrics)-1].Timestamp,
+		From:       metrics[0].Timestamp.In(loc),
+		To:         metrics[len(metrics)-1].Timestamp.In(loc),
 		DataPoints: len(metrics),
 	}
 
