@@ -16,6 +16,7 @@ type CollectorInfo struct {
 	Collector *ActuatorCollector
 	Cancel    context.CancelFunc
 	Interval  time.Duration
+	Endpoint  string
 }
 
 // Manager manages multiple collectors with hot reload support
@@ -65,9 +66,9 @@ func (m *Manager) UpdateFromConfig(cfg *config.Config) {
 			key := target.Name + "/" + inst.ID
 
 			if existing, exists := m.collectors[key]; exists {
-				// Check if interval changed
-				if existing.Interval != target.Interval {
-					log.Printf("Restarting collector (interval changed): %s", key)
+				// Check if interval or endpoint changed
+				if existing.Interval != target.Interval || existing.Endpoint != inst.Endpoint {
+					log.Printf("Restarting collector (config changed): %s -> %s (interval: %v)", key, inst.Endpoint, target.Interval)
 					existing.Cancel()
 					m.startCollector(target.Name, inst.ID, inst.Endpoint, target.Interval)
 				}
@@ -94,6 +95,7 @@ func (m *Manager) startCollector(name, instanceID, endpoint string, interval tim
 		Collector: collector,
 		Cancel:    cancel,
 		Interval:  interval,
+		Endpoint:  endpoint,
 	}
 
 	go m.runCollector(ctx, collector, interval)
