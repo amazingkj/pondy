@@ -75,7 +75,14 @@ function ChartPlaceholder({ height = 160 }: { height?: number }) {
 
 export const TargetCard = memo(function TargetCard({ target, globalView, renderIndex = 0 }: TargetCardProps) {
   const [range, setRange] = useState('1h');
+  const [showInstances, setShowInstances] = useState(false);
+  const [selectedInstance, setSelectedInstance] = useState<string | null>(null);
   const { theme, colors: themeColors } = useTheme();
+
+  const hasMultipleInstances = target.instances && target.instances.length > 1;
+  const displayMetrics = selectedInstance
+    ? target.instances?.find(i => i.instance_name === selectedInstance)?.current
+    : target.current;
 
   // Debounce globalView changes to prevent rapid toggle issues
   const debouncedGlobalView = useDebouncedValue(globalView, 50);
@@ -99,8 +106,8 @@ export const TargetCard = memo(function TargetCard({ target, globalView, renderI
     showHeatmap ? '24h' : range
   );
 
-  const current = target.current;
-  const isOffline = !current;
+  const current = displayMetrics;
+  const isOffline = !target.current;
   const status = isOffline ? 'offline' : (target.status || 'unknown');
   const statusColor = statusColors[status] || statusColors.unknown;
 
@@ -154,6 +161,97 @@ export const TargetCard = memo(function TargetCard({ target, globalView, renderI
         </div>
         {current && <PoolGauge active={current.active} max={current.max} size={80} />}
       </div>
+
+      {/* Instance Selector for multi-instance targets */}
+      {hasMultipleInstances && (
+        <div style={{ marginTop: '10px' }}>
+          <button
+            onClick={() => setShowInstances(!showInstances)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 10px',
+              border: `1px solid ${themeColors.border}`,
+              borderRadius: '6px',
+              backgroundColor: themeColors.bgSecondary,
+              color: themeColors.text,
+              cursor: 'pointer',
+              fontSize: '12px',
+              width: '100%',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>
+              {selectedInstance ? `Instance: ${selectedInstance}` : `All Instances (${target.instances!.length})`}
+            </span>
+            <span style={{ transform: showInstances ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+              ▼
+            </span>
+          </button>
+          {showInstances && (
+            <div
+              style={{
+                marginTop: '4px',
+                border: `1px solid ${themeColors.border}`,
+                borderRadius: '6px',
+                overflow: 'hidden',
+                backgroundColor: themeColors.bgCard,
+              }}
+            >
+              <div
+                onClick={() => { setSelectedInstance(null); setShowInstances(false); }}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  backgroundColor: selectedInstance === null ? themeColors.bgSecondary : 'transparent',
+                  borderBottom: `1px solid ${themeColors.border}`,
+                  fontSize: '12px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ fontWeight: selectedInstance === null ? 600 : 400 }}>All (Aggregated)</span>
+              </div>
+              {target.instances!.map((inst) => {
+                const instStatusColor = statusColors[inst.status] || statusColors.unknown;
+                return (
+                  <div
+                    key={inst.instance_name}
+                    onClick={() => { setSelectedInstance(inst.instance_name); setShowInstances(false); }}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      backgroundColor: selectedInstance === inst.instance_name ? themeColors.bgSecondary : 'transparent',
+                      borderBottom: `1px solid ${themeColors.border}`,
+                      fontSize: '12px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ fontWeight: selectedInstance === inst.instance_name ? 600 : 400 }}>
+                      {inst.instance_name}
+                    </span>
+                    <span
+                      style={{
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        backgroundColor: instStatusColor.bg,
+                        color: instStatusColor.text,
+                      }}
+                    >
+                      {inst.status.toUpperCase()}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Offline Message */}
       {isOffline && (

@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { useHistory, useRecommendations, useLeakDetection, usePeakTime, useAnomalies, useComparison, exportCSV } from '../hooks/useMetrics';
+import { useHistory, useRecommendations, useLeakDetection, usePeakTime, useAnomalies, useComparison } from '../hooks/useMetrics';
 import type { AnomalySensitivity } from '../hooks/useMetrics';
+import type { InstanceStatus } from '../types/metrics';
 import { TrendChart } from './TrendChart';
 import { HeatmapChart } from './HeatmapChart';
+import { ExportModal } from './ExportModal';
 import { useTheme } from '../context/ThemeContext';
 
 export type DetailView = 'trend' | 'heatmap' | 'peakTime' | 'anomalies' | 'compare' | 'recs' | 'leaks' | null;
 
 interface TargetDetailPanelProps {
   targetName: string;
+  instances?: InstanceStatus[];
   detailView: DetailView;
   setDetailView: (v: DetailView) => void;
   detailRange: string;
@@ -17,6 +20,7 @@ interface TargetDetailPanelProps {
 
 export function TargetDetailPanel({
   targetName,
+  instances,
   detailView,
   setDetailView,
   detailRange,
@@ -26,6 +30,7 @@ export function TargetDetailPanel({
   const [comparePeriod, setComparePeriod] = useState<'day' | 'week'>('day');
   const [anomalyRange, setAnomalyRange] = useState('24h');
   const [anomalySensitivity, setAnomalySensitivity] = useState<AnomalySensitivity>('medium');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const needHistory = detailView === 'trend' || detailView === 'heatmap';
   const { data: history, loading: historyLoading } = useHistory(needHistory ? targetName : '', detailView === 'heatmap' ? '24h' : detailRange);
@@ -59,36 +64,21 @@ export function TargetDetailPanel({
         <div style={{ fontSize: '14px', fontWeight: 600, color: colors.text }}>
           {targetName}
         </div>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <button
-            onClick={() => exportCSV(targetName)}
-            style={{
-              padding: '4px 10px',
-              border: `1px solid ${colors.border}`,
-              borderRadius: '4px',
-              backgroundColor: colors.bgCard,
-              color: colors.text,
-              cursor: 'pointer',
-              fontSize: '11px',
-            }}
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={() => window.open(`/api/targets/${targetName}/report?range=24h`, '_blank')}
-            style={{
-              padding: '4px 10px',
-              border: `1px solid ${colors.border}`,
-              borderRadius: '4px',
-              backgroundColor: colors.bgCard,
-              color: colors.text,
-              cursor: 'pointer',
-              fontSize: '11px',
-            }}
-          >
-            Report
-          </button>
-        </div>
+        <button
+          onClick={() => setShowExportModal(true)}
+          style={{
+            padding: '4px 12px',
+            border: `1px solid ${colors.border}`,
+            borderRadius: '4px',
+            backgroundColor: '#22c55e',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 500,
+          }}
+        >
+          Export / Report
+        </button>
       </div>
 
       {/* View Tabs */}
@@ -483,6 +473,15 @@ export function TargetDetailPanel({
             <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary }}>Unable to analyze</div>
           )}
         </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <ExportModal
+          targetName={targetName}
+          instances={instances}
+          onClose={() => setShowExportModal(false)}
+        />
       )}
     </div>
   );

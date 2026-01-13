@@ -7,6 +7,7 @@ import { ActionButton } from './ActionButton';
 import { AggregateStatsPanel } from './AggregateStatsPanel';
 import { TargetDetailPanel, type DetailView } from './TargetDetailPanel';
 import { HexagonView } from './HexagonView';
+import { BulkExportModal } from './BulkExportModal';
 
 type ViewMode = 'cards' | 'hexagon';
 
@@ -53,6 +54,7 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOverItem, setDragOverItem] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [showBulkExport, setShowBulkExport] = useState(false);
   const { theme, colors } = useTheme();
 
   // Handle drag start
@@ -263,6 +265,21 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
             <ActionButton active={showComparisonChart} onClick={() => setShowComparisonChart(!showComparisonChart)}>
               {showComparisonChart ? 'Hide Chart' : 'Show Chart'}
             </ActionButton>
+            <button
+              onClick={() => setShowBulkExport(true)}
+              style={{
+                padding: '6px 12px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: '#22c55e',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+              }}
+            >
+              Export All
+            </button>
           </div>
 
           {/* Hexagon View */}
@@ -424,6 +441,7 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
           {selectedTarget && (
             <TargetDetailPanel
               targetName={selectedTarget}
+              instances={data?.targets?.find(t => t.name === selectedTarget)?.instances}
               detailView={detailView}
               setDetailView={setDetailView}
               detailRange={detailRange}
@@ -435,23 +453,30 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
           {showComparisonChart && (
             <div style={{ marginTop: '16px' }}>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {['1h', '6h', '24h'].map((r) => (
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  {[
+                    { value: '1h', label: '1h' },
+                    { value: '6h', label: '6h' },
+                    { value: '24h', label: '24h' },
+                    { value: '168h', label: '7d' },
+                    { value: '720h', label: '30d' },
+                    { value: '1008h', label: '6w' },
+                  ].map((r) => (
                     <button
-                      key={r}
-                      onClick={() => setComparisonRange(r)}
+                      key={r.value}
+                      onClick={() => setComparisonRange(r.value)}
                       style={{
                         padding: '4px 10px',
                         border: `1px solid ${colors.border}`,
                         borderRadius: '4px',
-                        backgroundColor: comparisonRange === r ? '#3b82f6' : colors.bgCard,
-                        color: comparisonRange === r ? '#fff' : colors.text,
+                        backgroundColor: comparisonRange === r.value ? '#3b82f6' : colors.bgCard,
+                        color: comparisonRange === r.value ? '#fff' : colors.text,
                         cursor: 'pointer',
                         fontSize: '12px',
                         fontWeight: 500,
                       }}
                     >
-                      {r}
+                      {r.label}
                     </button>
                   ))}
                 </div>
@@ -486,6 +511,11 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
             </div>
           )}
         </div>
+      )}
+
+      {/* Bulk Export Modal */}
+      {showBulkExport && (
+        <BulkExportModal onClose={() => setShowBulkExport(false)} />
       )}
     </div>
   );

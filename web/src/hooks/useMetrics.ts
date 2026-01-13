@@ -90,6 +90,36 @@ export function formatTime(timestamp: string | undefined | null, timezone: strin
   }
 }
 
+// Format date+time for longer ranges (includes month/day)
+export function formatDateTime(timestamp: string | undefined | null, timezone: string = 'Local'): string {
+  if (!timestamp) return '--/-- --:--';
+
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return '--/-- --:--';
+
+  const options: Intl.DateTimeFormatOptions = {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  };
+
+  // Handle special timezone values
+  if (timezone === 'Local' || timezone === '') {
+    return date.toLocaleString('ko-KR', options);
+  }
+
+  // Use specific timezone
+  try {
+    return date.toLocaleString('ko-KR', {
+      ...options,
+      timeZone: timezone === 'UTC' ? 'UTC' : timezone,
+    });
+  } catch {
+    return date.toLocaleString('ko-KR', options);
+  }
+}
+
 export function useTargets(refreshInterval = 5000) {
   const [data, setData] = useState<TargetsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -302,8 +332,24 @@ export function useLeakDetection(targetName: string, enabled = false) {
   return { data, loading, error, refetch: fetchLeaks };
 }
 
-export function exportCSV(targetName: string, range = '24h') {
-  window.open(`${API_BASE}/targets/${targetName}/export?range=${range}`, '_blank');
+export function exportCSV(targetName: string, range = '24h', instance?: string) {
+  let url = `${API_BASE}/targets/${targetName}/export?range=${range}`;
+  if (instance) {
+    url += `&instance=${encodeURIComponent(instance)}`;
+  }
+  window.open(url, '_blank');
+}
+
+export function openReport(targetName: string, range = '24h') {
+  window.open(`${API_BASE}/targets/${targetName}/report?range=${range}`, '_blank');
+}
+
+export function exportAllCSV(range = '24h') {
+  window.open(`${API_BASE}/export/all?range=${range}`, '_blank');
+}
+
+export function openCombinedReport(range = '24h') {
+  window.open(`${API_BASE}/report/combined?range=${range}`, '_blank');
 }
 
 export function usePeakTime(targetName: string, enabled = false) {

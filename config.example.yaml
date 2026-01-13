@@ -11,7 +11,7 @@ logging:
 
 # Data retention settings
 retention:
-  max_age: 7d           # Keep data for 7 days (supports: 1d, 7d, 30d, etc.)
+  max_age: 42d          # Keep data for 6 weeks (supports: 1d, 7d, 30d, etc.)
   cleanup_interval: 1h  # Run cleanup every hour
 
 # Timezone for chart display (default: Local)

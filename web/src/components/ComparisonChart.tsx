@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { useTheme } from '../context/ThemeContext';
-import { useSettings, formatTime } from '../hooks/useMetrics';
+import { useSettings, formatTime, formatDateTime } from '../hooks/useMetrics';
 
 type MetricType = 'usage' | 'cpu' | 'heap' | 'threads';
 
@@ -53,6 +53,19 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
   const prevDataRef = useRef<{ [key: string]: HistoryData }>({});
+  const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
+
+  const handleLegendClick = (dataKey: string) => {
+    setHiddenLines(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(dataKey)) {
+        newSet.delete(dataKey);
+      } else {
+        newSet.add(dataKey);
+      }
+      return newSet;
+    });
+  };
 
   // Create a stable key for targetNames to prevent unnecessary re-fetches
   const targetNamesKey = useMemo(() => [...targetNames].sort().join(','), [targetNames]);
@@ -120,6 +133,10 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
     }
   };
 
+  // Determine if we need date format (for ranges >= 24h)
+  const rangeHours = parseInt(range) || 1;
+  const useDateTime = rangeHours >= 24;
+
   // Merge all data points by timestamp
   const timeMap = new Map<string, Record<string, number>>();
   let maxValue = 0;
@@ -129,7 +146,9 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
     if (!history?.datapoints) return;
 
     history.datapoints.forEach((dp) => {
-      const time = formatTime(dp.timestamp, timezone);
+      const time = useDateTime
+        ? formatDateTime(dp.timestamp, timezone)
+        : formatTime(dp.timestamp, timezone);
       const value = getMetricValue(dp);
       maxValue = Math.max(maxValue, value);
 
@@ -185,7 +204,29 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
             itemStyle={{ fontSize: '11px', padding: '2px 0' }}
             formatter={(value) => [`${value}${config.unit}`, '']}
           />
-          <Legend wrapperStyle={{ fontSize: '12px' }} />
+          <Legend
+            wrapperStyle={{ fontSize: '12px' }}
+            onClick={(e) => {
+              if (e && e.dataKey) {
+                handleLegendClick(e.dataKey as string);
+              }
+            }}
+            formatter={(value, entry) => {
+              const isHidden = hiddenLines.has(entry.dataKey as string);
+              return (
+                <span
+                  style={{
+                    color: isHidden ? colors.textSecondary : colors.text,
+                    textDecoration: isHidden ? 'line-through' : 'none',
+                    cursor: 'pointer',
+                    opacity: isHidden ? 0.5 : 1,
+                  }}
+                >
+                  {value}
+                </span>
+              );
+            }}
+          />
           {targetNames.map((name, index) => (
             <Line
               key={name}
@@ -196,6 +237,7 @@ export function ComparisonChart({ targetNames, range = '1h', metric = 'usage' }:
               dot={false}
               connectNulls
               isAnimationActive={false}
+              hide={hiddenLines.has(name)}
             />
           ))}
         </LineChart>

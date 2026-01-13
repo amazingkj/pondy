@@ -33,6 +33,7 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 		api.GET("/targets/:name/compare", handler.ComparePeriods)
 		api.GET("/targets/:name/report", handler.GenerateReport)
 		api.GET("/report/combined", handler.GenerateCombinedReport)
+		api.GET("/export/all", handler.ExportAllCSV)
 
 		// Alert endpoints
 		api.GET("/alerts", handler.GetAlerts)

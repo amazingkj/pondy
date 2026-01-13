@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jiin/pondy/internal/models"
 )
 
 // Common default durations
@@ -70,4 +71,79 @@ func RespondBadRequest(c *gin.Context, message string) {
 // RespondNoData sends a standard "no data available" response
 func RespondNoData(c *gin.Context) {
 	RespondNotFound(c, "no data available for analysis")
+}
+
+// downsampleMetrics reduces data points to maxPoints using time-bucket averaging
+func downsampleMetrics(data []models.PoolMetrics, maxPoints int) []models.PoolMetrics {
+	if maxPoints <= 0 || len(data) <= maxPoints {
+		return data
+	}
+
+	bucketSize := len(data) / maxPoints
+	if bucketSize < 1 {
+		bucketSize = 1
+	}
+
+	result := make([]models.PoolMetrics, 0, maxPoints)
+
+	for i := 0; i < len(data); i += bucketSize {
+		end := i + bucketSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		bucket := data[i:end]
+		if len(bucket) == 0 {
+			continue
+		}
+
+		// Aggregate bucket values
+		var sumActive, sumIdle, sumPending, sumMax int
+		var sumHeapUsed, sumHeapMax, sumNonHeapUsed int64
+		var sumThreadsLive int
+		var sumGcCount, sumYoungGcCount, sumOldGcCount int64
+		var sumCpuUsage, sumGcTime float64
+
+		for _, m := range bucket {
+			sumActive += m.Active
+			sumIdle += m.Idle
+			sumPending += m.Pending
+			sumMax += m.Max
+			sumHeapUsed += m.HeapUsed
+			sumHeapMax += m.HeapMax
+			sumNonHeapUsed += m.NonHeapUsed
+			sumThreadsLive += m.ThreadsLive
+			sumCpuUsage += m.CpuUsage
+			sumGcCount += m.GcCount
+			sumGcTime += m.GcTime
+			sumYoungGcCount += m.YoungGcCount
+			sumOldGcCount += m.OldGcCount
+		}
+
+		n := len(bucket)
+		n64 := int64(n)
+		aggregated := models.PoolMetrics{
+			TargetName:   bucket[0].TargetName,
+			InstanceName: bucket[0].InstanceName,
+			Status:       bucket[n/2].Status, // Use middle point status
+			Active:       sumActive / n,
+			Idle:         sumIdle / n,
+			Pending:      sumPending / n,
+			Max:          sumMax / n,
+			HeapUsed:     sumHeapUsed / n64,
+			HeapMax:      sumHeapMax / n64,
+			NonHeapUsed:  sumNonHeapUsed / n64,
+			ThreadsLive:  sumThreadsLive / n,
+			CpuUsage:     sumCpuUsage / float64(n),
+			GcCount:      sumGcCount / n64,
+			GcTime:       sumGcTime / float64(n),
+			YoungGcCount: sumYoungGcCount / n64,
+			OldGcCount:   sumOldGcCount / n64,
+			Timestamp:    bucket[n/2].Timestamp, // Use middle point timestamp
+		}
+
+		result = append(result, aggregated)
+	}
+
+	return result
 }

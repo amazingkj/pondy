@@ -99,8 +99,25 @@ func (h *Handler) GetTargets(c *gin.Context) {
 			Status: "unknown",
 		}
 
+		// Build set of valid instance IDs from config
+		validInstances := make(map[string]bool)
+		for _, inst := range t.GetInstances() {
+			validInstances[inst.ID] = true
+		}
+
 		staleThreshold := h.calculateStaleThreshold(t.Interval)
 		instanceMetrics, err := h.store.GetLatestAllInstances(t.Name)
+
+		// Filter to only include instances that are in current config
+		if err == nil && len(instanceMetrics) > 0 {
+			var filteredMetrics []models.PoolMetrics
+			for _, m := range instanceMetrics {
+				if validInstances[m.InstanceName] {
+					filteredMetrics = append(filteredMetrics, m)
+				}
+			}
+			instanceMetrics = filteredMetrics
+		}
 
 		if err == nil && len(instanceMetrics) > 0 {
 			status = h.buildTargetStatus(t.Name, instanceMetrics, staleThreshold)
@@ -142,6 +159,12 @@ func (h *Handler) buildTargetStatus(name string, instanceMetrics []models.PoolMe
 	status := models.TargetStatus{Name: name, Status: "unknown"}
 	var instances []models.InstanceStatus
 	var totalActive, totalIdle, totalPending, totalMax int
+	var totalHeapUsed, totalHeapMax, totalNonHeapUsed int64
+	var totalThreadsLive int
+	var totalCpuUsage float64
+	var totalGcCount, totalYoungGcCount, totalOldGcCount int64
+	var totalGcTime float64
+	var activeInstanceCount int
 	worstStatus := "healthy"
 	allStale := true
 
@@ -159,10 +182,23 @@ func (h *Handler) buildTargetStatus(name string, instanceMetrics []models.PoolMe
 		var currentMetrics *models.PoolMetrics
 		if !isStale {
 			currentMetrics = &m
+			activeInstanceCount++
+			// Pool metrics
 			totalActive += m.Active
 			totalIdle += m.Idle
 			totalPending += m.Pending
 			totalMax += m.Max
+			// JVM metrics
+			totalHeapUsed += m.HeapUsed
+			totalHeapMax += m.HeapMax
+			totalNonHeapUsed += m.NonHeapUsed
+			totalThreadsLive += m.ThreadsLive
+			totalCpuUsage += m.CpuUsage
+			// GC metrics
+			totalGcCount += m.GcCount
+			totalGcTime += m.GcTime
+			totalYoungGcCount += m.YoungGcCount
+			totalOldGcCount += m.OldGcCount
 		}
 
 		instances = append(instances, models.InstanceStatus{
@@ -188,13 +224,30 @@ func (h *Handler) buildTargetStatus(name string, instanceMetrics []models.PoolMe
 		if len(instanceMetrics) == 1 && time.Since(instanceMetrics[0].Timestamp) <= staleThreshold {
 			status.Current = &instanceMetrics[0]
 		} else if totalMax > 0 {
+			// Calculate average CPU usage
+			avgCpuUsage := 0.0
+			if activeInstanceCount > 0 {
+				avgCpuUsage = totalCpuUsage / float64(activeInstanceCount)
+			}
 			status.Current = &models.PoolMetrics{
 				TargetName:   name,
 				InstanceName: "aggregated",
-				Active:       totalActive,
-				Idle:         totalIdle,
-				Pending:      totalPending,
-				Max:          totalMax,
+				// Pool metrics (sum)
+				Active:  totalActive,
+				Idle:    totalIdle,
+				Pending: totalPending,
+				Max:     totalMax,
+				// JVM metrics (sum for memory/threads, avg for CPU)
+				HeapUsed:    totalHeapUsed,
+				HeapMax:     totalHeapMax,
+				NonHeapUsed: totalNonHeapUsed,
+				ThreadsLive: totalThreadsLive,
+				CpuUsage:    avgCpuUsage,
+				// GC metrics (sum)
+				GcCount:      totalGcCount,
+				GcTime:       totalGcTime,
+				YoungGcCount: totalYoungGcCount,
+				OldGcCount:   totalOldGcCount,
 			}
 		}
 	}
@@ -245,8 +298,17 @@ func (h *Handler) GetTargetHistory(c *gin.Context) {
 	instance := c.Query("instance")
 	tr := ParseTimeRangeFromContext(c, DefaultRangeShort)
 
+	// Parse limit parameter (default: 500, max: 10000, 0 = no limit)
+	limitStr := c.DefaultQuery("limit", "500")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 0 {
+		limit = 500
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+
 	var datapoints []models.PoolMetrics
-	var err error
 	if instance != "" {
 		datapoints, err = h.store.GetHistoryByInstance(name, instance, tr.From, tr.To)
 	} else {
@@ -256,6 +318,11 @@ func (h *Handler) GetTargetHistory(c *gin.Context) {
 	if err != nil {
 		RespondInternalError(c, err)
 		return
+	}
+
+	// Downsample if limit > 0
+	if limit > 0 {
+		datapoints = downsampleMetrics(datapoints, limit)
 	}
 
 	c.JSON(http.StatusOK, models.HistoryResponse{
@@ -302,9 +369,16 @@ func (h *Handler) DetectLeaks(c *gin.Context) {
 
 func (h *Handler) ExportCSV(c *gin.Context) {
 	name := c.Param("name")
+	instance := c.Query("instance")
 	tr := ParseTimeRangeFromContext(c, DefaultRangeLong)
 
-	datapoints, err := h.store.GetHistory(name, tr.From, tr.To)
+	var datapoints []models.PoolMetrics
+	var err error
+	if instance != "" {
+		datapoints, err = h.store.GetHistoryByInstance(name, instance, tr.From, tr.To)
+	} else {
+		datapoints, err = h.store.GetHistory(name, tr.From, tr.To)
+	}
 	if err != nil {
 		RespondInternalError(c, err)
 		return
@@ -312,17 +386,27 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 
 	loc := h.cfg().GetLocation()
 	filename := fmt.Sprintf("%s_%s.csv", name, time.Now().In(loc).Format("20060102_150405"))
+	if instance != "" {
+		filename = fmt.Sprintf("%s_%s_%s.csv", name, instance, time.Now().In(loc).Format("20060102_150405"))
+	}
 	c.Header("Content-Type", "text/csv")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()
 
-	writer.Write([]string{"timestamp", "status", "active", "idle", "pending", "max", "timeout", "acquire_p99", "heap_used", "heap_max", "non_heap_used", "threads_live", "cpu_usage"})
+	// Header with all fields including GC metrics
+	writer.Write([]string{
+		"timestamp", "instance_name", "status",
+		"active", "idle", "pending", "max", "timeout", "acquire_p99",
+		"heap_used", "heap_max", "non_heap_used", "threads_live", "cpu_usage",
+		"gc_count", "gc_time", "young_gc_count", "old_gc_count",
+	})
 
 	for _, d := range datapoints {
 		writer.Write([]string{
 			d.Timestamp.In(loc).Format(time.RFC3339),
+			d.InstanceName,
 			d.Status,
 			fmt.Sprintf("%d", d.Active),
 			fmt.Sprintf("%d", d.Idle),
@@ -335,7 +419,63 @@ func (h *Handler) ExportCSV(c *gin.Context) {
 			fmt.Sprintf("%d", d.NonHeapUsed),
 			fmt.Sprintf("%d", d.ThreadsLive),
 			fmt.Sprintf("%.4f", d.CpuUsage),
+			fmt.Sprintf("%d", d.GcCount),
+			fmt.Sprintf("%.4f", d.GcTime),
+			fmt.Sprintf("%d", d.YoungGcCount),
+			fmt.Sprintf("%d", d.OldGcCount),
 		})
+	}
+}
+
+func (h *Handler) ExportAllCSV(c *gin.Context) {
+	tr := ParseTimeRangeFromContext(c, DefaultRangeLong)
+	loc := h.cfg().GetLocation()
+
+	filename := fmt.Sprintf("all_targets_%s.csv", time.Now().In(loc).Format("20060102_150405"))
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+
+	writer := csv.NewWriter(c.Writer)
+	defer writer.Flush()
+
+	// Header with all fields including target_name
+	writer.Write([]string{
+		"target_name", "timestamp", "instance_name", "status",
+		"active", "idle", "pending", "max", "timeout", "acquire_p99",
+		"heap_used", "heap_max", "non_heap_used", "threads_live", "cpu_usage",
+		"gc_count", "gc_time", "young_gc_count", "old_gc_count",
+	})
+
+	// Export data for all configured targets
+	for _, target := range h.cfg().Targets {
+		datapoints, err := h.store.GetHistory(target.Name, tr.From, tr.To)
+		if err != nil {
+			continue
+		}
+
+		for _, d := range datapoints {
+			writer.Write([]string{
+				d.TargetName,
+				d.Timestamp.In(loc).Format(time.RFC3339),
+				d.InstanceName,
+				d.Status,
+				fmt.Sprintf("%d", d.Active),
+				fmt.Sprintf("%d", d.Idle),
+				fmt.Sprintf("%d", d.Pending),
+				fmt.Sprintf("%d", d.Max),
+				fmt.Sprintf("%d", d.Timeout),
+				fmt.Sprintf("%.2f", d.AcquireP99),
+				fmt.Sprintf("%d", d.HeapUsed),
+				fmt.Sprintf("%d", d.HeapMax),
+				fmt.Sprintf("%d", d.NonHeapUsed),
+				fmt.Sprintf("%d", d.ThreadsLive),
+				fmt.Sprintf("%.4f", d.CpuUsage),
+				fmt.Sprintf("%d", d.GcCount),
+				fmt.Sprintf("%.4f", d.GcTime),
+				fmt.Sprintf("%d", d.YoungGcCount),
+				fmt.Sprintf("%d", d.OldGcCount),
+			})
+		}
 	}
 }
 
