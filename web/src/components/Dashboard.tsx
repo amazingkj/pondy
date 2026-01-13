@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useTargets } from '../hooks/useMetrics';
+import { useTargets, useActiveAlerts } from '../hooks/useMetrics';
 import { TargetCard } from './TargetCard';
 import { Overview } from './Overview';
+import { AlertPanel } from './AlertPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { useTheme } from '../context/ThemeContext';
 import { useKeyboardShortcuts, useShortcutsHelp } from '../hooks/useKeyboardShortcuts';
 import { ShortcutsHelp } from './ShortcutsHelp';
@@ -15,7 +17,10 @@ const STORAGE_KEYS = {
 
 export function Dashboard() {
   const { data, loading, error } = useTargets(5000);
+  const { data: activeAlerts } = useActiveAlerts();
   const [globalView, setGlobalView] = useState<GlobalView>(null);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [targetOrder, setTargetOrder] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.TARGET_ORDER);
@@ -86,16 +91,18 @@ export function Dashboard() {
     { key: 'r', action: () => window.location.reload(), description: 'Reload page' },
     { key: 't', action: () => handleGlobalToggle('trend'), description: 'Toggle Trends view' },
     { key: 'h', action: () => handleGlobalToggle('heatmap'), description: 'Toggle Heatmap view' },
+    { key: 'a', action: () => setShowAlerts(prev => !prev), description: 'Toggle Alerts panel' },
+    { key: 's', action: () => setShowSettings(prev => !prev), description: 'Toggle Settings panel' },
     { key: 'd', action: toggleTheme, description: 'Toggle dark mode' },
-    { key: 'Escape', action: () => { setGlobalView(null); setSelectedGroup(null); }, description: 'Clear selections' },
+    { key: 'Escape', action: () => { setGlobalView(null); setSelectedGroup(null); setShowAlerts(false); setShowSettings(false); }, description: 'Clear selections' },
     { key: '?', action: shortcutsHelp.toggle, description: 'Show shortcuts help' },
   ], [handleGlobalToggle, toggleTheme, shortcutsHelp.toggle]);
 
   useKeyboardShortcuts(shortcuts);
 
-  // Get unique groups from data
+  // Get unique groups from data (sorted alphabetically)
   const groups = useMemo(() => {
-    return data?.groups || [];
+    return [...(data?.groups || [])].sort((a, b) => a.localeCompare(b));
   }, [data?.groups]);
 
   // Get ordered and filtered targets
@@ -175,38 +182,104 @@ export function Dashboard() {
               </div>
             )}
           </div>
-          <button
-            onClick={toggleTheme}
-            style={{
-              padding: '8px 12px',
-              border: `1px solid ${colors.border}`,
-              borderRadius: '8px',
-              backgroundColor: colors.bgSecondary,
-              color: colors.text,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '13px',
-            }}
-          >
-            {theme === 'dark' ? (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="5"/>
-                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                </svg>
-                Light
-              </>
-            ) : (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                </svg>
-                Dark
-              </>
-            )}
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setShowAlerts(prev => !prev)}
+              style={{
+                padding: '8px 12px',
+                border: `1px solid ${showAlerts ? '#3b82f6' : colors.border}`,
+                borderRadius: '8px',
+                backgroundColor: showAlerts ? (theme === 'dark' ? '#1e3a5f' : '#dbeafe') : colors.bgSecondary,
+                color: showAlerts ? '#3b82f6' : colors.text,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+                position: 'relative',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              Alerts
+              {activeAlerts.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '18px',
+                    height: '18px',
+                    padding: '0 4px',
+                    borderRadius: '9px',
+                    backgroundColor: '#ef4444',
+                    color: '#fff',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {activeAlerts.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowSettings(prev => !prev)}
+              style={{
+                padding: '8px 12px',
+                border: `1px solid ${showSettings ? '#3b82f6' : colors.border}`,
+                borderRadius: '8px',
+                backgroundColor: showSettings ? (theme === 'dark' ? '#1e3a5f' : '#dbeafe') : colors.bgSecondary,
+                color: showSettings ? '#3b82f6' : colors.text,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            <button
+              onClick={toggleTheme}
+              style={{
+                padding: '8px 12px',
+                border: `1px solid ${colors.border}`,
+                borderRadius: '8px',
+                backgroundColor: colors.bgSecondary,
+                color: colors.text,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+              }}
+            >
+              {theme === 'dark' ? (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="5"/>
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                  </svg>
+                  Light
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                  </svg>
+                  Dark
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -243,6 +316,7 @@ export function Dashboard() {
               onGlobalToggle={handleGlobalToggle}
               targetOrder={targetOrder}
               onTargetOrderChange={setTargetOrder}
+              selectedGroup={selectedGroup}
             />
             <div
               style={{
@@ -358,6 +432,16 @@ export function Dashboard() {
         onClose={shortcutsHelp.close}
         shortcuts={shortcuts}
       />
+
+      {/* Alert Panel */}
+      {showAlerts && (
+        <AlertPanel onClose={() => setShowAlerts(false)} />
+      )}
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }

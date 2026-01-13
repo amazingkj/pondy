@@ -18,6 +18,7 @@ type Config struct {
 	Storage   StorageConfig   `mapstructure:"storage"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
 	Retention RetentionConfig `mapstructure:"retention"`
+	Alerting  AlertingConfig  `mapstructure:"alerting"`
 	Targets   []TargetConfig  `mapstructure:"targets"`
 	Timezone  string          `mapstructure:"timezone"` // e.g., "Asia/Seoul", "UTC", "Local"
 }
@@ -39,6 +40,120 @@ func (r *RetentionConfig) GetMaxAge() time.Duration {
 
 func (r *RetentionConfig) GetCleanupInterval() time.Duration {
 	return parseDurationWithDays(r.CleanupInterval, time.Hour)
+}
+
+// AlertingConfig holds alerting configuration
+type AlertingConfig struct {
+	Enabled       bool            `mapstructure:"enabled"`
+	CheckInterval time.Duration   `mapstructure:"check_interval"`
+	Cooldown      time.Duration   `mapstructure:"cooldown"`
+	Rules         []AlertRule     `mapstructure:"rules"`
+	Channels      ChannelsConfig  `mapstructure:"channels"`
+}
+
+// GetCheckInterval returns the check interval with default
+func (a *AlertingConfig) GetCheckInterval() time.Duration {
+	if a.CheckInterval <= 0 {
+		return 30 * time.Second
+	}
+	return a.CheckInterval
+}
+
+// GetCooldown returns the cooldown with default
+func (a *AlertingConfig) GetCooldown() time.Duration {
+	if a.Cooldown <= 0 {
+		return 5 * time.Minute
+	}
+	return a.Cooldown
+}
+
+// AlertRule defines an alerting rule
+type AlertRule struct {
+	Name      string `mapstructure:"name"`
+	Condition string `mapstructure:"condition"` // e.g., "usage > 80", "pending > 5"
+	Severity  string `mapstructure:"severity"`  // info, warning, critical
+	Message   string `mapstructure:"message"`   // Template message
+	Enabled   *bool  `mapstructure:"enabled"`   // Default true if nil
+}
+
+// IsEnabled returns whether the rule is enabled
+func (r *AlertRule) IsEnabled() bool {
+	if r.Enabled == nil {
+		return true
+	}
+	return *r.Enabled
+}
+
+// ChannelsConfig holds all notification channel configurations
+type ChannelsConfig struct {
+	Slack      SlackConfig      `mapstructure:"slack"`
+	Discord    DiscordConfig    `mapstructure:"discord"`
+	Mattermost MattermostConfig `mapstructure:"mattermost"`
+	Webhook    WebhookConfig    `mapstructure:"webhook"`
+	Email      EmailConfig      `mapstructure:"email"`
+	Notion     NotionConfig     `mapstructure:"notion"`
+	Plugins    []PluginConfig   `mapstructure:"plugins"`
+}
+
+// SlackConfig holds Slack notification settings
+type SlackConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url"`
+	Channel    string `mapstructure:"channel"`
+	Username   string `mapstructure:"username"`
+}
+
+// DiscordConfig holds Discord notification settings
+type DiscordConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url"`
+}
+
+// MattermostConfig holds Mattermost notification settings
+type MattermostConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url"`
+	Channel    string `mapstructure:"channel"`
+	Username   string `mapstructure:"username"`
+}
+
+// WebhookConfig holds generic webhook notification settings
+type WebhookConfig struct {
+	Enabled bool              `mapstructure:"enabled"`
+	URL     string            `mapstructure:"url"`
+	Method  string            `mapstructure:"method"`
+	Headers map[string]string `mapstructure:"headers"`
+}
+
+// EmailConfig holds email notification settings
+type EmailConfig struct {
+	Enabled  bool     `mapstructure:"enabled"`
+	SMTPHost string   `mapstructure:"smtp_host"`
+	SMTPPort int      `mapstructure:"smtp_port"`
+	Username string   `mapstructure:"username"`
+	Password string   `mapstructure:"password"`
+	From     string   `mapstructure:"from"`
+	To       []string `mapstructure:"to"`
+	UseTLS   bool     `mapstructure:"use_tls"`
+}
+
+// NotionConfig holds Notion notification settings
+type NotionConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	Token      string `mapstructure:"token"`       // Notion integration token
+	DatabaseID string `mapstructure:"database_id"` // Notion database ID
+}
+
+// PluginConfig holds HTTP plugin settings
+type PluginConfig struct {
+	Name        string            `mapstructure:"name"`
+	Enabled     bool              `mapstructure:"enabled"`
+	URL         string            `mapstructure:"url"`          // HTTP endpoint to call
+	Method      string            `mapstructure:"method"`       // HTTP method (POST, PUT, etc.)
+	Headers     map[string]string `mapstructure:"headers"`      // Custom headers
+	Timeout     time.Duration     `mapstructure:"timeout"`      // Request timeout
+	RetryCount  int               `mapstructure:"retry_count"`  // Number of retries
+	RetryDelay  time.Duration     `mapstructure:"retry_delay"`  // Delay between retries
 }
 
 // GetLocation returns the time.Location for the configured timezone
@@ -188,11 +303,14 @@ func (m *Manager) pollForChanges() {
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
 
+	log.Printf("Config polling started (interval: %v)", m.pollInterval)
+
 	for {
 		select {
 		case <-ticker.C:
 			currentHash, err := fileHash(m.configPath)
 			if err != nil {
+				log.Printf("Config polling: failed to hash file: %v", err)
 				continue
 			}
 
@@ -201,11 +319,12 @@ func (m *Manager) pollForChanges() {
 			m.mu.RUnlock()
 
 			if currentHash != lastHash {
-				log.Printf("Config file changed (polling detected)")
+				log.Printf("Config file changed (polling detected): hash %s -> %s", lastHash[:8], currentHash[:8])
 				m.reload()
 				m.updateHash()
 			}
 		case <-m.stopPolling:
+			log.Printf("Config polling stopped")
 			return
 		}
 	}
@@ -242,20 +361,34 @@ func (m *Manager) OnReload(callback func(*Config)) {
 }
 
 func (m *Manager) reload() {
-	var cfg Config
-	if err := viper.Unmarshal(&cfg); err != nil {
-		log.Printf("Failed to reload config: %v", err)
+	log.Printf("Config reload triggered, re-reading file: %s", m.configPath)
+
+	// Re-read config file first (viper caches values)
+	if err := viper.ReadInConfig(); err != nil {
+		log.Printf("Failed to re-read config file: %v", err)
 		return
 	}
+
+	var cfg Config
+	if err := viper.Unmarshal(&cfg); err != nil {
+		log.Printf("Failed to unmarshal config: %v", err)
+		return
+	}
+
+	// Log target details for debugging
+	var targetNames []string
+	for _, t := range cfg.Targets {
+		targetNames = append(targetNames, t.Name)
+	}
+	log.Printf("Config reloaded: %d targets: %v", len(cfg.Targets), targetNames)
 
 	m.mu.Lock()
 	m.config = &cfg
 	callbacks := m.callbacks
 	m.mu.Unlock()
 
-	log.Printf("Config reloaded: %d targets", len(cfg.Targets))
-
 	// Notify callbacks
+	log.Printf("Notifying %d config reload callbacks", len(callbacks))
 	for _, cb := range callbacks {
 		cb(&cfg)
 	}

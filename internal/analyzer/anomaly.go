@@ -38,9 +38,34 @@ type AnomalyStats struct {
 	AnomalyPercent float64 `json:"anomaly_percent"`
 }
 
+// AnomalyOptions configures anomaly detection sensitivity
+type AnomalyOptions struct {
+	Sensitivity string // low, medium, high (affects std deviation threshold)
+}
+
+// GetThresholds returns detection thresholds based on sensitivity
+func (o *AnomalyOptions) GetThresholds() (stdDevThreshold, spikeThreshold, pendingThreshold float64) {
+	switch o.Sensitivity {
+	case "low":
+		return 3.0, 100.0, 20.0 // Less sensitive
+	case "high":
+		return 1.5, 30.0, 5.0 // More sensitive
+	default: // medium
+		return 2.0, 50.0, 10.0
+	}
+}
+
 // DetectAnomalies analyzes metrics for unusual patterns
 // loc is the timezone for timestamps (if nil, uses UTC)
 func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.Location) *AnomalyResult {
+	return DetectAnomaliesWithOptions(targetName, metrics, loc, nil)
+}
+
+// DetectAnomaliesWithOptions analyzes metrics with configurable options
+func DetectAnomaliesWithOptions(targetName string, metrics []models.PoolMetrics, loc *time.Location, opts *AnomalyOptions) *AnomalyResult {
+	if opts == nil {
+		opts = &AnomalyOptions{Sensitivity: "medium"}
+	}
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -74,8 +99,8 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 	mean := calculateMean(usages)
 	stdDev := calculateStdDev(usages, mean)
 
-	// Use 2 standard deviations as threshold for anomaly detection
-	threshold := 2.0
+	// Get thresholds based on sensitivity
+	stdDevThreshold, spikeThreshold, pendingThreshold := opts.GetThresholds()
 
 	// Detect anomalies
 	var anomalies []Anomaly
@@ -85,9 +110,9 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 		deviation := (usage - mean) / stdDev
 
 		// Check for high usage anomaly
-		if math.Abs(deviation) > threshold {
+		if math.Abs(deviation) > stdDevThreshold {
 			severity := "warning"
-			if math.Abs(deviation) > 3 {
+			if math.Abs(deviation) > stdDevThreshold+1 {
 				severity = "critical"
 			}
 
@@ -112,7 +137,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 		// Check for sudden spike (comparing with previous value)
 		if i > 0 && usages[i-1] > 0 {
 			change := (usage - usages[i-1]) / usages[i-1] * 100
-			if change > 50 {
+			if change > spikeThreshold {
 				anomalies = append(anomalies, Anomaly{
 					Timestamp: m.Timestamp.In(loc),
 					Type:      "sudden_spike",
@@ -123,7 +148,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 					Deviation: change,
 				})
 			}
-			if change < -50 {
+			if change < -spikeThreshold {
 				anomalies = append(anomalies, Anomaly{
 					Timestamp: m.Timestamp.In(loc),
 					Type:      "sudden_drop",
@@ -139,7 +164,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 		// Check for sustained high pending
 		if m.Pending > 0 && m.Max > 0 {
 			pendingRatio := float64(m.Pending) / float64(m.Max) * 100
-			if pendingRatio > 10 {
+			if pendingRatio > pendingThreshold {
 				anomalies = append(anomalies, Anomaly{
 					Timestamp: m.Timestamp.In(loc),
 					Type:      "high_pending",
@@ -172,7 +197,7 @@ func DetectAnomalies(targetName string, metrics []models.PoolMetrics, loc *time.
 		Statistics: AnomalyStats{
 			MeanUsage:      mean,
 			StdDeviation:   stdDev,
-			Threshold:      threshold,
+			Threshold:      stdDevThreshold,
 			AnomalyCount:   len(anomalies),
 			AnomalyPercent: anomalyPercent,
 		},

@@ -95,3 +95,62 @@ export interface LeakAnalysisResult {
   alerts: LeakAlert[];
   health_score: number;
 }
+
+// Alert types
+export interface Alert {
+  id: number;
+  target_name: string;
+  instance_name: string;
+  rule_name: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  status: 'fired' | 'resolved';
+  fired_at: string;
+  resolved_at?: string;
+  notified_at?: string;
+  channels?: string;
+}
+
+export interface AlertsResponse {
+  alerts: Alert[];
+}
+
+export interface AlertStats {
+  total_alerts: number;
+  active_alerts: number;
+  resolved_alerts: number;
+  critical_count: number;
+  warning_count: number;
+  info_count: number;
+}
+
+// Alert Rule types
+export interface AlertRule {
+  id: number;
+  name: string;
+  condition: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertRuleInput {
+  name: string;
+  condition: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  enabled?: boolean;
+}
+
+export interface AlertRulesResponse {
+  rules: AlertRule[];
+  config_rules: {
+    name: string;
+    condition: string;
+    severity: string;
+    message: string;
+    enabled?: boolean;
+  }[];
+}

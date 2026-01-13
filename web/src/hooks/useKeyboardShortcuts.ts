@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 
 export interface ShortcutConfig {
   key: string;
@@ -19,8 +19,14 @@ export function useKeyboardShortcuts(
 ) {
   const { enabled = true } = options;
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  // Store shortcuts in ref to avoid re-registering event listeners
+  const shortcutsRef = useRef(shortcuts);
+  shortcutsRef.current = shortcuts;
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
       // Don't trigger shortcuts when typing in inputs
       const target = event.target as HTMLElement;
       if (
@@ -31,7 +37,7 @@ export function useKeyboardShortcuts(
         return;
       }
 
-      for (const shortcut of shortcuts) {
+      for (const shortcut of shortcutsRef.current) {
         const keyMatch = event.key.toLowerCase() === shortcut.key.toLowerCase();
         const ctrlMatch = shortcut.ctrl ? event.ctrlKey || event.metaKey : !event.ctrlKey && !event.metaKey;
         const shiftMatch = shortcut.shift ? event.shiftKey : !event.shiftKey;
@@ -43,16 +49,12 @@ export function useKeyboardShortcuts(
           return;
         }
       }
-    },
-    [shortcuts]
-  );
+    };
 
-  useEffect(() => {
-    if (!enabled) return;
-
-    window.addEventListener('keydown', handleKeyDown);
+    // Use passive event listener for better scroll performance
+    window.addEventListener('keydown', handleKeyDown, { passive: false });
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown, enabled]);
+  }, [enabled]); // Only re-register when enabled changes
 }
 
 // Hook to show shortcuts help modal

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jiin/pondy/internal/config"
+	"github.com/jiin/pondy/internal/models"
 	"github.com/jiin/pondy/internal/storage"
 )
 
@@ -19,9 +20,10 @@ type CollectorInfo struct {
 
 // Manager manages multiple collectors with hot reload support
 type Manager struct {
-	mu         sync.RWMutex
-	collectors map[string]*CollectorInfo // key: "targetName/instanceID"
-	store      storage.Storage
+	mu            sync.RWMutex
+	collectors    map[string]*CollectorInfo // key: "targetName/instanceID"
+	store         storage.Storage
+	alertCallback func(*models.PoolMetrics)
 }
 
 // NewManager creates a new collector manager
@@ -128,6 +130,15 @@ func (m *Manager) collect(c *ActuatorCollector) {
 	if err := m.store.Save(metrics); err != nil {
 		log.Printf("Failed to save metrics for %s/%s: %v", c.Name(), c.InstanceName(), err)
 	}
+
+	// Alert check hook
+	m.mu.RLock()
+	callback := m.alertCallback
+	m.mu.RUnlock()
+
+	if callback != nil && metrics != nil {
+		callback(metrics)
+	}
 }
 
 // Stop stops all collectors
@@ -147,4 +158,11 @@ func (m *Manager) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.collectors)
+}
+
+// SetAlertCallback sets the callback function for alert checking
+func (m *Manager) SetAlertCallback(callback func(*models.PoolMetrics)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.alertCallback = callback
 }

@@ -184,6 +184,176 @@ curl http://localhost:8080/api/targets/my-service/report?range=24h > report.html
 - 이상 탐지 결과
 - 연결 누수 분석
 
+### Alerting
+
+임계값 기반 알림 시스템을 지원합니다. 조건 충족 시 다양한 채널로 알림을 전송하고, 조건 해소 시 자동으로 resolved 처리됩니다.
+
+```yaml
+alerting:
+  enabled: true
+  check_interval: 30s   # 알림 체크 주기
+  cooldown: 5m          # 동일 알림 재발송 방지 시간
+
+  rules:
+    - name: high_usage
+      condition: "usage > 80"
+      severity: warning
+      message: "Pool usage is high: {{ .Usage }}%"
+
+    - name: critical_usage
+      condition: "usage > 95"
+      severity: critical
+      message: "Pool usage critical: {{ .Usage }}%"
+
+    - name: pending_connections
+      condition: "pending > 5"
+      severity: warning
+      message: "{{ .Pending }} connections waiting"
+
+    - name: no_idle
+      condition: "idle == 0"
+      severity: critical
+      message: "No idle connections available"
+
+  channels:
+    slack:
+      enabled: true
+      webhook_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+      channel: "#alerts"
+```
+
+**Rule 조건식에서 사용 가능한 변수:**
+
+| 변수 | 설명 |
+|------|------|
+| `active` | 현재 활성 커넥션 수 |
+| `idle` | 유휴 커넥션 수 |
+| `pending` | 대기 중인 요청 수 |
+| `max` | 최대 풀 크기 |
+| `usage` | 풀 사용률 (%) |
+| `timeout` | 타임아웃 발생 수 |
+| `heap_usage` | JVM 힙 메모리 사용률 (%) |
+| `cpu_usage` | CPU 사용률 (%) |
+
+**지원 채널:**
+- Slack
+- Discord
+- Mattermost
+- Webhook (generic)
+- Email (SMTP)
+- Notion
+- Custom Plugins (HTTP)
+
+#### Notion Integration
+
+Notion 데이터베이스에 알림을 자동으로 기록합니다:
+
+```yaml
+alerting:
+  channels:
+    notion:
+      enabled: true
+      token: "secret_xxx"        # Notion Integration Token
+      database_id: "xxx-xxx-xxx" # 대상 데이터베이스 ID
+```
+
+**Notion 데이터베이스 필수 속성:**
+
+| 속성 이름 | 타입 | 설명 |
+|-----------|------|------|
+| Name | Title | 알림 제목 |
+| Message | Rich Text | 알림 메시지 |
+| Target | Rich Text | 대상 서비스명 |
+| Instance | Rich Text | 인스턴스 ID |
+| Severity | Select | info / warning / critical |
+| Status | Select | Fired / Resolved |
+| Rule | Rich Text | 규칙명 |
+| Fired At | Date | 발생 시각 |
+| Resolved At | Date | 해결 시각 (옵션) |
+
+#### Custom Plugin System
+
+HTTP 기반 플러그인으로 사용자 정의 알림 핸들러를 연동할 수 있습니다:
+
+```yaml
+alerting:
+  channels:
+    plugins:
+      - name: custom-handler
+        enabled: true
+        url: "https://your-service.com/api/alerts"
+        method: POST
+        headers:
+          Authorization: "Bearer your-token"
+          X-Custom-Header: "value"
+        timeout: 10s
+        retry_count: 3
+        retry_delay: 1s
+
+      - name: pagerduty
+        enabled: true
+        url: "https://events.pagerduty.com/v2/enqueue"
+        method: POST
+        timeout: 15s
+```
+
+**플러그인이 수신하는 JSON Payload:**
+
+```json
+{
+  "event": "alert.fired",
+  "alert": {
+    "id": 1,
+    "target_name": "user-service",
+    "instance_name": "default",
+    "rule_name": "high_usage",
+    "severity": "warning",
+    "message": "Pool usage is high: 85%",
+    "status": "fired",
+    "fired_at": "2024-01-01T12:00:00Z",
+    "resolved_at": null
+  },
+  "metadata": {
+    "timestamp": "2024-01-01T12:00:05Z",
+    "plugin_name": "custom-handler",
+    "version": "1.0"
+  }
+}
+```
+
+| event 값 | 설명 |
+|----------|------|
+| `alert.fired` | 알림 발생 |
+| `alert.resolved` | 알림 해소 |
+
+**플러그인 설정 옵션:**
+
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `name` | 플러그인 식별자 | (필수) |
+| `url` | HTTP 엔드포인트 URL | (필수) |
+| `method` | HTTP 메서드 | `POST` |
+| `headers` | 커스텀 HTTP 헤더 | `{}` |
+| `timeout` | 요청 타임아웃 | `10s` |
+| `retry_count` | 실패 시 재시도 횟수 | `1` |
+| `retry_delay` | 재시도 간격 | `1s` |
+
+#### Alert API
+
+```bash
+# 알림 목록 조회
+curl http://localhost:8080/api/alerts
+
+# 활성 알림만 조회
+curl http://localhost:8080/api/alerts/active
+
+# 테스트 알림 발송
+curl -X POST http://localhost:8080/api/alerts/test
+
+# 알림 통계
+curl http://localhost:8080/api/alerts/stats
+```
+
 ## API
 
 | Endpoint | Description |

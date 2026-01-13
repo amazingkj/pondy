@@ -7,15 +7,16 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jiin/pondy/internal/alerter"
 	"github.com/jiin/pondy/internal/config"
 	"github.com/jiin/pondy/internal/storage"
 )
 
-func NewRouter(cfgMgr *config.Manager, store storage.Storage, webFS embed.FS) *gin.Engine {
+func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.Manager, webFS embed.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	handler := NewHandler(cfgMgr, store)
+	handler := NewHandler(cfgMgr, store, alertMgr)
 
 	api := r.Group("/api")
 	{
@@ -32,6 +33,28 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, webFS embed.FS) *g
 		api.GET("/targets/:name/compare", handler.ComparePeriods)
 		api.GET("/targets/:name/report", handler.GenerateReport)
 		api.GET("/report/combined", handler.GenerateCombinedReport)
+
+		// Alert endpoints
+		api.GET("/alerts", handler.GetAlerts)
+		api.GET("/alerts/active", handler.GetActiveAlerts)
+		api.GET("/alerts/stats", handler.GetAlertStats)
+		api.GET("/alerts/channels", handler.GetAlertChannels)
+		api.GET("/alerts/:id", handler.GetAlert)
+		api.POST("/alerts/:id/resolve", handler.ResolveAlert)
+		api.POST("/alerts/test", handler.TestAlert)
+
+		// Alert Rule endpoints
+		api.GET("/rules", handler.GetAlertRules)
+		api.GET("/rules/:id", handler.GetAlertRule)
+		api.POST("/rules", handler.CreateAlertRule)
+		api.PUT("/rules/:id", handler.UpdateAlertRule)
+		api.DELETE("/rules/:id", handler.DeleteAlertRule)
+		api.PATCH("/rules/:id/toggle", handler.ToggleAlertRule)
+
+		// Backup endpoints
+		api.POST("/backup", handler.CreateBackup)
+		api.GET("/backup/download", handler.DownloadBackup)
+		api.POST("/backup/restore", handler.RestoreBackup)
 	}
 
 	// Health check

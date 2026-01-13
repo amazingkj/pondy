@@ -8,10 +8,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Configuration file (required)
-      - ./config.yaml:/app/config.yaml:ro
+      # Mount config directory (not file) for hot-reload support
+      - ./config:/app/config:ro
       # Data directory for SQLite database
       - pondy-data:/app/data
+    command: ["pondy", "-config", "/app/config/config.yaml"]
     environment:
       # Optional: Set timezone for the container
       - TZ=Asia/Seoul
@@ -50,12 +51,13 @@ services:
     image: jiin724/pondy:latest
     container_name: pondy-demo
     restart: unless-stopped
-    command: ["both", "-config", "/app/config.yaml"]
+    command: ["both", "-config", "/app/config/config.yaml"]
     ports:
       - "8080:8080"
       - "9090:9090"
     volumes:
-      - ./config.mock.yaml:/app/config.yaml:ro
+      # Mount config directory (not file) for hot-reload support
+      - ./config:/app/config:ro
       - pondy-data:/app/data
     environment:
       - TZ=Asia/Seoul

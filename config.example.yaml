@@ -18,6 +18,108 @@ retention:
 # Examples: "Asia/Seoul", "Asia/Tokyo", "UTC", "Local"
 timezone: Asia/Seoul
 
+# Alerting configuration
+alerting:
+  enabled: true
+  check_interval: 30s   # Alert check interval (embedded in metrics collection)
+  cooldown: 5m          # Prevent duplicate alerts for same rule
+
+  # Alert rules (simple expression syntax)
+  rules:
+    - name: high_usage
+      condition: "usage > 80"
+      severity: warning
+      message: "Pool usage is high: {{ .Usage }}%"
+
+    - name: critical_usage
+      condition: "usage > 95"
+      severity: critical
+      message: "Pool usage critical: {{ .Usage }}%"
+
+    - name: pending_connections
+      condition: "pending > 5"
+      severity: warning
+      message: "{{ .Pending }} connections waiting"
+
+    - name: no_idle
+      condition: "idle == 0"
+      severity: critical
+      message: "No idle connections available"
+
+    - name: connection_timeout
+      condition: "timeout > 0"
+      severity: critical
+      message: "Connection timeout detected"
+
+  # Notification channels
+  channels:
+    slack:
+      enabled: false
+      webhook_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+      channel: "#alerts"
+      username: "Pondy"
+
+    discord:
+      enabled: false
+      webhook_url: "https://discord.com/api/webhooks/xxx/yyy"
+
+    mattermost:
+      enabled: false
+      webhook_url: "https://mattermost.example.com/hooks/xxx"
+      channel: "alerts"
+      username: "Pondy"
+
+    webhook:
+      enabled: false
+      url: "https://example.com/webhook"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer xxx"
+
+    email:
+      enabled: false
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+      from: "pondy@example.com"
+      to:
+        - "admin@example.com"
+        - "ops@example.com"
+      use_tls: true
+
+    # Notion integration (creates database entries for alerts)
+    notion:
+      enabled: false
+      token: "secret_xxx"        # Notion integration token
+      database_id: "xxx-xxx-xxx" # Target database ID
+
+    # Custom plugin channels (HTTP-based)
+    # Plugins receive standardized JSON payloads for custom alert handling
+    plugins:
+      - name: custom-alert-handler
+        enabled: false
+        url: "https://your-service.com/api/alerts"
+        method: POST
+        headers:
+          Authorization: "Bearer your-token"
+          X-Custom-Header: "custom-value"
+        timeout: 10s
+        retry_count: 3
+        retry_delay: 1s
+
+      # Example: PagerDuty integration via custom plugin
+      - name: pagerduty
+        enabled: false
+        url: "https://events.pagerduty.com/v2/enqueue"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        timeout: 15s
+        retry_count: 2
+        retry_delay: 2s
+
 targets:
   # Simple single-instance target
   - name: user-service

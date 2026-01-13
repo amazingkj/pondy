@@ -18,10 +18,20 @@ interface TargetCardProps {
 
 const statusColors: Record<string, { bg: string; text: string; border: string }> = {
   healthy: { bg: '#dcfce7', text: '#166534', border: '#22c55e' },
+  running: { bg: '#dcfce7', text: '#166534', border: '#22c55e' },
   warning: { bg: '#fef3c7', text: '#92400e', border: '#f59e0b' },
   critical: { bg: '#fee2e2', text: '#991b1b', border: '#ef4444' },
   unknown: { bg: '#f3f4f6', text: '#374151', border: '#9ca3af' },
   offline: { bg: '#fef2f2', text: '#7f1d1d', border: '#991b1b' },
+};
+
+const statusLabels: Record<string, string> = {
+  healthy: 'RUNNING',
+  running: 'RUNNING',
+  warning: 'WARNING',
+  critical: 'CRITICAL',
+  unknown: 'UNKNOWN',
+  offline: 'OFFLINE',
 };
 
 function formatBytes(bytes: number): string {
@@ -139,7 +149,7 @@ export const TargetCard = memo(function TargetCard({ target, globalView, renderI
               color: statusColor.text,
             }}
           >
-            {isOffline ? 'OFFLINE' : status.toUpperCase()}
+            {statusLabels[status] || status.toUpperCase()}
           </span>
         </div>
         {current && <PoolGauge active={current.active} max={current.max} size={80} />}
@@ -215,15 +225,34 @@ export const TargetCard = memo(function TargetCard({ target, globalView, renderI
               </div>
             )}
 
-            {/* Non-Heap */}
+            {/* Non-Heap - show with visual bar */}
             {current.non_heap_used > 0 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
                   <span style={{ color: themeColors.textSecondary }}>Non-Heap</span>
-                  <span style={{ color: themeColors.text }}>{formatBytes(current.non_heap_used)}</span>
+                  <span style={{
+                    color: current.non_heap_used > 500 * 1024 * 1024 ? '#f59e0b' : '#8b5cf6',
+                    fontWeight: 600,
+                    transition: 'color 0.3s',
+                  }}>
+                    {formatBytes(current.non_heap_used)}
+                  </span>
                 </div>
-                <div style={{ height: '6px', backgroundColor: themeColors.border, borderRadius: '3px', overflow: 'hidden' }}>
-                  <div style={{ width: '100%', height: '100%', backgroundColor: '#8b5cf6' }} />
+                <div style={{
+                  height: '6px',
+                  backgroundColor: themeColors.border,
+                  borderRadius: '3px',
+                  overflow: 'hidden',
+                  position: 'relative',
+                }}>
+                  <div
+                    style={{
+                      width: `${Math.min((current.non_heap_used / (700 * 1024 * 1024)) * 100, 100)}%`,
+                      height: '100%',
+                      backgroundColor: current.non_heap_used > 500 * 1024 * 1024 ? '#f59e0b' : '#8b5cf6',
+                      transition: 'width 0.5s ease-out, background-color 0.3s',
+                    }}
+                  />
                 </div>
               </div>
             )}
