@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Alert represents an alert event
 type Alert struct {
@@ -162,20 +166,29 @@ func parseDaysOfWeek(s string) []int {
 }
 
 func splitComma(s string) []string {
-	var result []string
-	for _, p := range []byte(s) {
-		if p == ',' {
-			continue
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
 		}
-		result = append(result, string(p))
 	}
 	return result
 }
 
 func parseIntFromStr(s string, out *int) (bool, error) {
-	if len(s) == 1 && s[0] >= '0' && s[0] <= '9' {
-		*out = int(s[0] - '0')
-		return true, nil
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false, nil
 	}
-	return false, nil
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return false, err
+	}
+	*out = val
+	return true, nil
 }

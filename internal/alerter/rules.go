@@ -3,6 +3,7 @@ package alerter
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -216,7 +217,12 @@ func getContextValue(ctx *RuleContext, varName string) (float64, error) {
 // Returns false if either value is NaN or Inf to prevent undefined behavior
 func evaluateCondition(left float64, operator string, right float64) (bool, error) {
 	// Guard against NaN and Inf values
-	if math.IsNaN(left) || math.IsInf(left, 0) || math.IsNaN(right) || math.IsInf(right, 0) {
+	if math.IsNaN(left) || math.IsInf(left, 0) {
+		log.Printf("Alerter: warning - left operand is NaN or Inf (value: %v), skipping condition", left)
+		return false, nil
+	}
+	if math.IsNaN(right) || math.IsInf(right, 0) {
+		log.Printf("Alerter: warning - right operand is NaN or Inf (value: %v), skipping condition", right)
 		return false, nil
 	}
 

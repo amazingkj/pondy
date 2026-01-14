@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html/template"
+	"log"
 	"net"
 	"net/smtp"
 	"strings"
@@ -69,10 +70,29 @@ func (e *EmailChannel) SendResolved(alert *models.Alert) error {
 func (e *EmailChannel) sendEmail(subject, body string) error {
 	addr := fmt.Sprintf("%s:%d", e.cfg.SMTPHost, e.cfg.SMTPPort)
 
+	// Validate and filter recipient emails
+	var validRecipients []string
+	for _, to := range e.cfg.To {
+		if ValidateEmail(to) {
+			validRecipients = append(validRecipients, to)
+		} else {
+			log.Printf("Email: warning - invalid email address '%s' skipped", to)
+		}
+	}
+
+	if len(validRecipients) == 0 {
+		return fmt.Errorf("no valid email recipients")
+	}
+
+	// Validate sender email
+	if !ValidateEmail(e.cfg.From) {
+		log.Printf("Email: warning - sender address '%s' may be invalid", e.cfg.From)
+	}
+
 	// Build message
 	var msg bytes.Buffer
 	msg.WriteString(fmt.Sprintf("From: %s\r\n", e.cfg.From))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(e.cfg.To, ",")))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(validRecipients, ",")))
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
@@ -87,14 +107,14 @@ func (e *EmailChannel) sendEmail(subject, body string) error {
 
 	// Send with TLS if configured
 	if e.cfg.UseTLS {
-		return e.sendWithTLS(addr, auth, msg.Bytes())
+		return e.sendWithTLS(addr, auth, validRecipients, msg.Bytes())
 	}
 
-	return e.sendWithTimeout(addr, auth, msg.Bytes())
+	return e.sendWithTimeout(addr, auth, validRecipients, msg.Bytes())
 }
 
 // sendWithTimeout sends email without TLS but with connection timeout
-func (e *EmailChannel) sendWithTimeout(addr string, auth smtp.Auth, msg []byte) error {
+func (e *EmailChannel) sendWithTimeout(addr string, auth smtp.Auth, recipients []string, msg []byte) error {
 	// Dial with timeout
 	conn, err := net.DialTimeout("tcp", addr, emailDialTimeout)
 	if err != nil {
@@ -123,7 +143,7 @@ func (e *EmailChannel) sendWithTimeout(addr string, auth smtp.Auth, msg []byte) 
 		return fmt.Errorf("SMTP MAIL command failed: %w", err)
 	}
 
-	for _, to := range e.cfg.To {
+	for _, to := range recipients {
 		if err := client.Rcpt(to); err != nil {
 			return fmt.Errorf("SMTP RCPT command failed for %s: %w", to, err)
 		}
@@ -145,7 +165,7 @@ func (e *EmailChannel) sendWithTimeout(addr string, auth smtp.Auth, msg []byte) 
 	return client.Quit()
 }
 
-func (e *EmailChannel) sendWithTLS(addr string, auth smtp.Auth, msg []byte) error {
+func (e *EmailChannel) sendWithTLS(addr string, auth smtp.Auth, recipients []string, msg []byte) error {
 	tlsConfig := &tls.Config{
 		ServerName: e.cfg.SMTPHost,
 	}
@@ -179,7 +199,7 @@ func (e *EmailChannel) sendWithTLS(addr string, auth smtp.Auth, msg []byte) erro
 		return fmt.Errorf("SMTP MAIL command failed: %w", err)
 	}
 
-	for _, to := range e.cfg.To {
+	for _, to := range recipients {
 		if err := client.Rcpt(to); err != nil {
 			return fmt.Errorf("SMTP RCPT command failed for %s: %w", to, err)
 		}

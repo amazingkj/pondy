@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/jiin/pondy/internal/models"
 )
+
+// Email validation regex - basic RFC 5322 pattern
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Common constants for alert channels
 const (
@@ -132,4 +136,21 @@ func FormatAlertTitle(alert *models.Alert) string {
 // FormatResolvedTitle formats a resolved alert title
 func FormatResolvedTitle(alert *models.Alert) string {
 	return fmt.Sprintf("✅ Resolved: %s", alert.RuleName)
+}
+
+// ValidateEmail validates an email address format
+func ValidateEmail(email string) bool {
+	return emailRegex.MatchString(email)
+}
+
+// ValidateEmails validates a list of email addresses
+// Returns invalid emails and true if all are valid
+func ValidateEmails(emails []string) ([]string, bool) {
+	var invalid []string
+	for _, email := range emails {
+		if !ValidateEmail(email) {
+			invalid = append(invalid, email)
+		}
+	}
+	return invalid, len(invalid) == 0
 }

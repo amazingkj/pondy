@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/jiin/pondy/internal/config"
 	"github.com/jiin/pondy/internal/models"
+)
+
+const (
+	webhookMaxRetries   = 3
+	webhookRetryDelay   = 2 * time.Second
+	webhookRetryBackoff = 2 // exponential backoff multiplier
 )
 
 // WebhookChannel sends alerts via generic HTTP webhook
@@ -96,28 +103,55 @@ func (w *WebhookChannel) sendPayload(event string, alert *models.Alert) error {
 		method = "POST"
 	}
 
-	req, err := http.NewRequest(method, w.cfg.URL, bytes.NewReader(body))
-	if err != nil {
-		return err
+	// Retry with exponential backoff
+	var lastErr error
+	delay := webhookRetryDelay
+
+	for attempt := 1; attempt <= webhookMaxRetries; attempt++ {
+		req, err := http.NewRequest(method, w.cfg.URL, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+
+		// Set default content type
+		req.Header.Set("Content-Type", "application/json")
+
+		// Set custom headers
+		for key, value := range w.cfg.Headers {
+			req.Header.Set(key, value)
+		}
+
+		resp, err := w.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < webhookMaxRetries {
+				log.Printf("Webhook: attempt %d/%d failed: %v, retrying in %v", attempt, webhookMaxRetries, err, delay)
+				time.Sleep(delay)
+				delay *= webhookRetryBackoff
+			}
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 500 {
+			// Server error - retry
+			lastErr = fmt.Errorf("webhook returned status %d", resp.StatusCode)
+			if attempt < webhookMaxRetries {
+				log.Printf("Webhook: attempt %d/%d failed with status %d, retrying in %v", attempt, webhookMaxRetries, resp.StatusCode, delay)
+				time.Sleep(delay)
+				delay *= webhookRetryBackoff
+			}
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			// Client error - don't retry
+			return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+		}
+
+		// Success
+		return nil
 	}
 
-	// Set default content type
-	req.Header.Set("Content-Type", "application/json")
-
-	// Set custom headers
-	for key, value := range w.cfg.Headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := w.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
-	}
-
-	return nil
+	return fmt.Errorf("webhook failed after %d attempts: %w", webhookMaxRetries, lastErr)
 }
