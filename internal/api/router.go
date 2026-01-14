@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jiin/pondy/internal/alerter"
@@ -16,9 +17,25 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	// Rate limiters
+	// General API: 100 requests per second, burst of 200
+	generalRL := NewRateLimiter(100, time.Second, 200)
+	// Strict: 10 requests per second, burst of 20 (for expensive endpoints)
+	strictRL := NewRateLimiter(10, time.Second, 20)
+	// Test alert: 1 request per 10 seconds, burst of 3
+	testAlertRL := NewRateLimiter(1, 10*time.Second, 3)
+
+	// Connection limiter: max 50 per IP, 500 total
+	connLimiter := NewConnectionLimiter(50, 500)
+
+	// Global middlewares
+	r.Use(ConnectionLimitMiddleware(connLimiter))
+	r.Use(MaxBodySizeMiddleware(10 * 1024 * 1024)) // 10MB max body size
+
 	handler := NewHandler(cfgMgr, store, alertMgr)
 
 	api := r.Group("/api")
+	api.Use(RateLimitMiddleware(generalRL))
 	{
 		api.GET("/settings", handler.GetSettings)
 		api.GET("/targets", handler.GetTargets)
@@ -27,13 +44,15 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 		api.GET("/targets/:name/history", handler.GetTargetHistory)
 		api.GET("/targets/:name/recommendations", handler.GetRecommendations)
 		api.GET("/targets/:name/leaks", handler.DetectLeaks)
-		api.GET("/targets/:name/export", handler.ExportCSV)
 		api.GET("/targets/:name/peaktime", handler.GetPeakTime)
-		api.GET("/targets/:name/anomalies", handler.DetectAnomalies)
-		api.GET("/targets/:name/compare", handler.ComparePeriods)
-		api.GET("/targets/:name/report", handler.GenerateReport)
-		api.GET("/report/combined", handler.GenerateCombinedReport)
-		api.GET("/export/all", handler.ExportAllCSV)
+
+		// CPU/Memory intensive endpoints - stricter rate limiting
+		api.GET("/targets/:name/export", StrictRateLimitMiddleware(strictRL), handler.ExportCSV)
+		api.GET("/targets/:name/anomalies", StrictRateLimitMiddleware(strictRL), handler.DetectAnomalies)
+		api.GET("/targets/:name/compare", StrictRateLimitMiddleware(strictRL), handler.ComparePeriods)
+		api.GET("/targets/:name/report", StrictRateLimitMiddleware(strictRL), handler.GenerateReport)
+		api.GET("/report/combined", StrictRateLimitMiddleware(strictRL), handler.GenerateCombinedReport)
+		api.GET("/export/all", StrictRateLimitMiddleware(strictRL), handler.ExportAllCSV)
 
 		// Alert endpoints
 		api.GET("/alerts", handler.GetAlerts)
@@ -42,7 +61,8 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 		api.GET("/alerts/channels", handler.GetAlertChannels)
 		api.GET("/alerts/:id", handler.GetAlert)
 		api.POST("/alerts/:id/resolve", handler.ResolveAlert)
-		api.POST("/alerts/test", handler.TestAlert)
+		// Test alert has very strict rate limiting to prevent external service abuse
+		api.POST("/alerts/test", StrictRateLimitMiddleware(testAlertRL), handler.TestAlert)
 
 		// Alert Rule endpoints
 		api.GET("/rules", handler.GetAlertRules)
@@ -52,10 +72,10 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 		api.DELETE("/rules/:id", handler.DeleteAlertRule)
 		api.PATCH("/rules/:id/toggle", handler.ToggleAlertRule)
 
-		// Backup endpoints
-		api.POST("/backup", handler.CreateBackup)
-		api.GET("/backup/download", handler.DownloadBackup)
-		api.POST("/backup/restore", handler.RestoreBackup)
+		// Backup endpoints - stricter rate limiting
+		api.POST("/backup", StrictRateLimitMiddleware(strictRL), handler.CreateBackup)
+		api.GET("/backup/download", StrictRateLimitMiddleware(strictRL), handler.DownloadBackup)
+		api.POST("/backup/restore", StrictRateLimitMiddleware(strictRL), handler.RestoreBackup)
 
 		// Target config CRUD endpoints
 		api.GET("/config/targets", handler.GetConfigTargets)
