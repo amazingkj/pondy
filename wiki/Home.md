@@ -4,8 +4,8 @@ Lightweight connection pool monitor for JVM applications.
 
 ## Getting Started
 
-- [Quick Start](https://github.com/jiin724/pondy#quick-start)
-- [Configuration](https://github.com/jiin724/pondy#configuration)
+- [Quick Start](Quick-Start) - 빠른 시작 가이드
+- [Configuration](Configuration) - 설정 파일 가이드
 
 ## Documentation
 

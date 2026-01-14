@@ -53,6 +53,8 @@ targets:
 
 자세한 설정 및 사용법은 [Wiki](../../wiki)를 참조하세요.
 
+- [Quick Start](../../wiki/Quick-Start)
+- [Configuration](../../wiki/Configuration)
 - [Multi-Instance Support](../../wiki/Multi-Instance-Support)
 - [Data Retention](../../wiki/Data-Retention)
 - [Alerting](../../wiki/Alerting)
