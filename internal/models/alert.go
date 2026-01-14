@@ -83,3 +83,99 @@ func (r *AlertRule) ToConfigRule() interface{} {
 		Enabled:   &enabled,
 	}
 }
+
+// MaintenanceWindow represents a scheduled maintenance period
+// During a maintenance window, alerts are suppressed
+type MaintenanceWindow struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	TargetName  string     `json:"target_name,omitempty"` // Empty means all targets
+	StartTime   time.Time  `json:"start_time"`
+	EndTime     time.Time  `json:"end_time"`
+	Recurring   bool       `json:"recurring"`           // If true, repeats weekly
+	DaysOfWeek  string     `json:"days_of_week,omitempty"` // Comma-separated days (0-6, 0=Sunday)
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// MaintenanceWindowInput is used for creating/updating maintenance windows
+type MaintenanceWindowInput struct {
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
+	TargetName  string `json:"target_name"`
+	StartTime   string `json:"start_time" binding:"required"` // RFC3339 format
+	EndTime     string `json:"end_time" binding:"required"`   // RFC3339 format
+	Recurring   bool   `json:"recurring"`
+	DaysOfWeek  string `json:"days_of_week"`
+}
+
+// IsActive checks if the maintenance window is currently active
+func (m *MaintenanceWindow) IsActive(now time.Time) bool {
+	if m.Recurring {
+		// For recurring windows, check if current day matches and time is within range
+		currentDay := int(now.Weekday())
+		days := parseDaysOfWeek(m.DaysOfWeek)
+
+		dayMatches := false
+		for _, d := range days {
+			if d == currentDay {
+				dayMatches = true
+				break
+			}
+		}
+		if !dayMatches {
+			return false
+		}
+
+		// Check time range (using only hour:minute)
+		nowMinutes := now.Hour()*60 + now.Minute()
+		startMinutes := m.StartTime.Hour()*60 + m.StartTime.Minute()
+		endMinutes := m.EndTime.Hour()*60 + m.EndTime.Minute()
+
+		return nowMinutes >= startMinutes && nowMinutes <= endMinutes
+	}
+
+	// One-time window: simple range check
+	return now.After(m.StartTime) && now.Before(m.EndTime)
+}
+
+// MatchesTarget checks if this window applies to the given target
+func (m *MaintenanceWindow) MatchesTarget(targetName string) bool {
+	return m.TargetName == "" || m.TargetName == targetName
+}
+
+// parseDaysOfWeek parses a comma-separated string of day numbers
+func parseDaysOfWeek(s string) []int {
+	if s == "" {
+		return nil
+	}
+
+	var days []int
+	for _, part := range splitComma(s) {
+		var day int
+		if _, err := parseIntFromStr(part, &day); err == nil && day >= 0 && day <= 6 {
+			days = append(days, day)
+		}
+	}
+	return days
+}
+
+func splitComma(s string) []string {
+	var result []string
+	for _, p := range []byte(s) {
+		if p == ',' {
+			continue
+		}
+		result = append(result, string(p))
+	}
+	return result
+}
+
+func parseIntFromStr(s string, out *int) (bool, error) {
+	if len(s) == 1 && s[0] >= '0' && s[0] <= '9' {
+		*out = int(s[0] - '0')
+		return true, nil
+	}
+	return false, nil
+}

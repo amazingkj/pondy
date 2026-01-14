@@ -28,6 +28,7 @@ type PoolMetrics struct {
 	HeapUsed    int64   `json:"heap_used"`     // bytes
 	HeapMax     int64   `json:"heap_max"`      // bytes
 	NonHeapUsed int64   `json:"non_heap_used"` // bytes
+	NonHeapMax  int64   `json:"non_heap_max"`  // bytes
 	ThreadsLive int     `json:"threads_live"`
 	CpuUsage    float64 `json:"cpu_usage"` // 0.0 ~ 1.0
 

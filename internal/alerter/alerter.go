@@ -56,37 +56,36 @@ func (m *Manager) ReloadRules() {
 	m.loadDBRules()
 }
 
+// channelFactory defines a channel constructor
+type channelFactory struct {
+	name    string
+	enabled bool
+	create  func() Channel
+}
+
 // initChannels initializes notification channels from config
 func (m *Manager) initChannels(cfg *config.AlertingConfig) {
 	m.channels = make([]Channel, 0)
 
-	// Add enabled channels
-	if cfg.Channels.Slack.Enabled {
-		m.channels = append(m.channels, NewSlackChannel(cfg.Channels.Slack))
-		log.Println("Alerter: Slack channel enabled")
-	}
-	if cfg.Channels.Discord.Enabled {
-		m.channels = append(m.channels, NewDiscordChannel(cfg.Channels.Discord))
-		log.Println("Alerter: Discord channel enabled")
-	}
-	if cfg.Channels.Mattermost.Enabled {
-		m.channels = append(m.channels, NewMattermostChannel(cfg.Channels.Mattermost))
-		log.Println("Alerter: Mattermost channel enabled")
-	}
-	if cfg.Channels.Webhook.Enabled {
-		m.channels = append(m.channels, NewWebhookChannel(cfg.Channels.Webhook))
-		log.Println("Alerter: Webhook channel enabled")
-	}
-	if cfg.Channels.Email.Enabled {
-		m.channels = append(m.channels, NewEmailChannel(cfg.Channels.Email))
-		log.Println("Alerter: Email channel enabled")
-	}
-	if cfg.Channels.Notion.Enabled {
-		m.channels = append(m.channels, NewNotionChannel(cfg.Channels.Notion))
-		log.Println("Alerter: Notion channel enabled")
+	// Define all available channels
+	factories := []channelFactory{
+		{"Slack", cfg.Channels.Slack.Enabled, func() Channel { return NewSlackChannel(cfg.Channels.Slack) }},
+		{"Discord", cfg.Channels.Discord.Enabled, func() Channel { return NewDiscordChannel(cfg.Channels.Discord) }},
+		{"Mattermost", cfg.Channels.Mattermost.Enabled, func() Channel { return NewMattermostChannel(cfg.Channels.Mattermost) }},
+		{"Webhook", cfg.Channels.Webhook.Enabled, func() Channel { return NewWebhookChannel(cfg.Channels.Webhook) }},
+		{"Email", cfg.Channels.Email.Enabled, func() Channel { return NewEmailChannel(cfg.Channels.Email) }},
+		{"Notion", cfg.Channels.Notion.Enabled, func() Channel { return NewNotionChannel(cfg.Channels.Notion) }},
 	}
 
-	// Add plugin channels
+	// Register enabled channels
+	for _, f := range factories {
+		if f.enabled {
+			m.channels = append(m.channels, f.create())
+			log.Printf("Alerter: %s channel enabled", f.name)
+		}
+	}
+
+	// Register plugin channels
 	for _, pluginCfg := range cfg.Channels.Plugins {
 		if pluginCfg.Enabled {
 			m.channels = append(m.channels, NewPluginChannel(pluginCfg))
@@ -113,6 +112,16 @@ func (m *Manager) Check(metrics *models.PoolMetrics) {
 	m.mu.RUnlock()
 
 	if cfg == nil || !cfg.Enabled {
+		return
+	}
+
+	// Check if target is in a maintenance window
+	inMaintenance, err := m.store.IsInMaintenanceWindow(metrics.TargetName)
+	if err != nil {
+		log.Printf("Alerter: error checking maintenance window: %v", err)
+	}
+	if inMaintenance {
+		// Skip alert processing during maintenance
 		return
 	}
 
@@ -152,16 +161,19 @@ func (m *Manager) evaluateRule(rule *config.AlertRule, ctx *RuleContext) {
 	alertKey := m.alertKey(ctx.TargetName, ctx.InstanceName, rule.Name)
 
 	if triggered {
-		// Check cooldown
-		m.mu.RLock()
+		// Atomic check-and-set for cooldown to prevent race condition
+		now := time.Now()
+		m.mu.Lock()
 		lastFired, exists := m.lastFired[alertKey]
 		cooldown := m.cfg.GetCooldown()
-		m.mu.RUnlock()
-
-		if exists && time.Since(lastFired) < cooldown {
+		if exists && now.Sub(lastFired) < cooldown {
 			// Still in cooldown period
+			m.mu.Unlock()
 			return
 		}
+		// Reserve the cooldown slot immediately to prevent duplicate alerts
+		m.lastFired[alertKey] = now
+		m.mu.Unlock()
 
 		// Check if there's already an active alert for this rule
 		existingAlert, err := m.store.GetActiveAlertByRule(ctx.TargetName, ctx.InstanceName, rule.Name)
@@ -175,14 +187,14 @@ func (m *Manager) evaluateRule(rule *config.AlertRule, ctx *RuleContext) {
 			return
 		}
 
-		// Create new alert
-		m.fireAlert(rule, ctx)
+		// Create new alert (cooldown already set above)
+		m.fireAlert(rule, ctx, now)
 	}
 }
 
 // fireAlert creates and sends a new alert
-func (m *Manager) fireAlert(rule *config.AlertRule, ctx *RuleContext) {
-	now := time.Now()
+// now parameter is the timestamp when alert was triggered (cooldown already set in evaluateRule)
+func (m *Manager) fireAlert(rule *config.AlertRule, ctx *RuleContext, now time.Time) {
 	message := RenderMessage(rule.Message, ctx)
 
 	alert := &models.Alert{
@@ -201,11 +213,7 @@ func (m *Manager) fireAlert(rule *config.AlertRule, ctx *RuleContext) {
 		return
 	}
 
-	// Update cooldown
-	alertKey := m.alertKey(ctx.TargetName, ctx.InstanceName, rule.Name)
-	m.mu.Lock()
-	m.lastFired[alertKey] = now
-	m.mu.Unlock()
+	// Cooldown already set in evaluateRule atomically
 
 	// Send notifications
 	m.sendNotifications(alert)

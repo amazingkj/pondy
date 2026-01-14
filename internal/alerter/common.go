@@ -17,6 +17,14 @@ const (
 	FooterText         = "Pondy Alert"
 )
 
+// Emojis for different severity levels
+const (
+	EmojiCritical = "🚨"
+	EmojiWarning  = "⚠️"
+	EmojiInfo     = "ℹ️"
+	EmojiResolved = "✅"
+)
+
 // Severity colors (hex strings for Slack/Mattermost)
 const (
 	ColorCritical = "#E74C3C"
@@ -37,11 +45,11 @@ const (
 func GetEmoji(severity string) string {
 	switch severity {
 	case models.SeverityCritical:
-		return "🚨"
+		return EmojiCritical
 	case models.SeverityWarning:
-		return "⚠️"
+		return EmojiWarning
 	default:
-		return "ℹ️"
+		return EmojiInfo
 	}
 }
 

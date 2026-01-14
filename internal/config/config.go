@@ -11,27 +11,28 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
-	Retention RetentionConfig `mapstructure:"retention"`
-	Alerting  AlertingConfig  `mapstructure:"alerting"`
-	Targets   []TargetConfig  `mapstructure:"targets"`
-	Timezone  string          `mapstructure:"timezone"` // e.g., "Asia/Seoul", "UTC", "Local"
+	Server    ServerConfig    `mapstructure:"server" yaml:"server"`
+	Storage   StorageConfig   `mapstructure:"storage" yaml:"storage"`
+	Logging   LoggingConfig   `mapstructure:"logging" yaml:"logging,omitempty"`
+	Retention RetentionConfig `mapstructure:"retention" yaml:"retention,omitempty"`
+	Alerting  AlertingConfig  `mapstructure:"alerting" yaml:"alerting,omitempty"`
+	Targets   []TargetConfig  `mapstructure:"targets" yaml:"targets"`
+	Timezone  string          `mapstructure:"timezone" yaml:"timezone,omitempty"` // e.g., "Asia/Seoul", "UTC", "Local"
 }
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
-	Level  string `mapstructure:"level"`  // debug, info, warn, error (default: info)
-	Format string `mapstructure:"format"` // text, json (default: text)
+	Level  string `mapstructure:"level" yaml:"level,omitempty"`   // debug, info, warn, error (default: info)
+	Format string `mapstructure:"format" yaml:"format,omitempty"` // text, json (default: text)
 }
 
 type RetentionConfig struct {
-	MaxAge          string `mapstructure:"max_age"`
-	CleanupInterval string `mapstructure:"cleanup_interval"`
+	MaxAge          string `mapstructure:"max_age" yaml:"max_age,omitempty"`
+	CleanupInterval string `mapstructure:"cleanup_interval" yaml:"cleanup_interval,omitempty"`
 }
 
 func (r *RetentionConfig) GetMaxAge() time.Duration {
@@ -44,11 +45,11 @@ func (r *RetentionConfig) GetCleanupInterval() time.Duration {
 
 // AlertingConfig holds alerting configuration
 type AlertingConfig struct {
-	Enabled       bool            `mapstructure:"enabled"`
-	CheckInterval time.Duration   `mapstructure:"check_interval"`
-	Cooldown      time.Duration   `mapstructure:"cooldown"`
-	Rules         []AlertRule     `mapstructure:"rules"`
-	Channels      ChannelsConfig  `mapstructure:"channels"`
+	Enabled       bool           `mapstructure:"enabled" yaml:"enabled"`
+	CheckInterval time.Duration  `mapstructure:"check_interval" yaml:"check_interval,omitempty"`
+	Cooldown      time.Duration  `mapstructure:"cooldown" yaml:"cooldown,omitempty"`
+	Rules         []AlertRule    `mapstructure:"rules" yaml:"rules,omitempty"`
+	Channels      ChannelsConfig `mapstructure:"channels" yaml:"channels,omitempty"`
 }
 
 // GetCheckInterval returns the check interval with default
@@ -69,11 +70,11 @@ func (a *AlertingConfig) GetCooldown() time.Duration {
 
 // AlertRule defines an alerting rule
 type AlertRule struct {
-	Name      string `mapstructure:"name"`
-	Condition string `mapstructure:"condition"` // e.g., "usage > 80", "pending > 5"
-	Severity  string `mapstructure:"severity"`  // info, warning, critical
-	Message   string `mapstructure:"message"`   // Template message
-	Enabled   *bool  `mapstructure:"enabled"`   // Default true if nil
+	Name      string `mapstructure:"name" yaml:"name"`
+	Condition string `mapstructure:"condition" yaml:"condition"` // e.g., "usage > 80", "pending > 5"
+	Severity  string `mapstructure:"severity" yaml:"severity"`   // info, warning, critical
+	Message   string `mapstructure:"message" yaml:"message,omitempty"` // Template message
+	Enabled   *bool  `mapstructure:"enabled" yaml:"enabled,omitempty"` // Default true if nil
 }
 
 // IsEnabled returns whether the rule is enabled
@@ -86,74 +87,74 @@ func (r *AlertRule) IsEnabled() bool {
 
 // ChannelsConfig holds all notification channel configurations
 type ChannelsConfig struct {
-	Slack      SlackConfig      `mapstructure:"slack"`
-	Discord    DiscordConfig    `mapstructure:"discord"`
-	Mattermost MattermostConfig `mapstructure:"mattermost"`
-	Webhook    WebhookConfig    `mapstructure:"webhook"`
-	Email      EmailConfig      `mapstructure:"email"`
-	Notion     NotionConfig     `mapstructure:"notion"`
-	Plugins    []PluginConfig   `mapstructure:"plugins"`
+	Slack      SlackConfig      `mapstructure:"slack" yaml:"slack,omitempty"`
+	Discord    DiscordConfig    `mapstructure:"discord" yaml:"discord,omitempty"`
+	Mattermost MattermostConfig `mapstructure:"mattermost" yaml:"mattermost,omitempty"`
+	Webhook    WebhookConfig    `mapstructure:"webhook" yaml:"webhook,omitempty"`
+	Email      EmailConfig      `mapstructure:"email" yaml:"email,omitempty"`
+	Notion     NotionConfig     `mapstructure:"notion" yaml:"notion,omitempty"`
+	Plugins    []PluginConfig   `mapstructure:"plugins" yaml:"plugins,omitempty"`
 }
 
 // SlackConfig holds Slack notification settings
 type SlackConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	WebhookURL string `mapstructure:"webhook_url"`
-	Channel    string `mapstructure:"channel"`
-	Username   string `mapstructure:"username"`
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url" yaml:"webhook_url,omitempty"`
+	Channel    string `mapstructure:"channel" yaml:"channel,omitempty"`
+	Username   string `mapstructure:"username" yaml:"username,omitempty"`
 }
 
 // DiscordConfig holds Discord notification settings
 type DiscordConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	WebhookURL string `mapstructure:"webhook_url"`
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url" yaml:"webhook_url,omitempty"`
 }
 
 // MattermostConfig holds Mattermost notification settings
 type MattermostConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	WebhookURL string `mapstructure:"webhook_url"`
-	Channel    string `mapstructure:"channel"`
-	Username   string `mapstructure:"username"`
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url" yaml:"webhook_url,omitempty"`
+	Channel    string `mapstructure:"channel" yaml:"channel,omitempty"`
+	Username   string `mapstructure:"username" yaml:"username,omitempty"`
 }
 
 // WebhookConfig holds generic webhook notification settings
 type WebhookConfig struct {
-	Enabled bool              `mapstructure:"enabled"`
-	URL     string            `mapstructure:"url"`
-	Method  string            `mapstructure:"method"`
-	Headers map[string]string `mapstructure:"headers"`
+	Enabled bool              `mapstructure:"enabled" yaml:"enabled"`
+	URL     string            `mapstructure:"url" yaml:"url,omitempty"`
+	Method  string            `mapstructure:"method" yaml:"method,omitempty"`
+	Headers map[string]string `mapstructure:"headers" yaml:"headers,omitempty"`
 }
 
 // EmailConfig holds email notification settings
 type EmailConfig struct {
-	Enabled  bool     `mapstructure:"enabled"`
-	SMTPHost string   `mapstructure:"smtp_host"`
-	SMTPPort int      `mapstructure:"smtp_port"`
-	Username string   `mapstructure:"username"`
-	Password string   `mapstructure:"password"`
-	From     string   `mapstructure:"from"`
-	To       []string `mapstructure:"to"`
-	UseTLS   bool     `mapstructure:"use_tls"`
+	Enabled  bool     `mapstructure:"enabled" yaml:"enabled"`
+	SMTPHost string   `mapstructure:"smtp_host" yaml:"smtp_host,omitempty"`
+	SMTPPort int      `mapstructure:"smtp_port" yaml:"smtp_port,omitempty"`
+	Username string   `mapstructure:"username" yaml:"username,omitempty"`
+	Password string   `mapstructure:"password" yaml:"password,omitempty"`
+	From     string   `mapstructure:"from" yaml:"from,omitempty"`
+	To       []string `mapstructure:"to" yaml:"to,omitempty"`
+	UseTLS   bool     `mapstructure:"use_tls" yaml:"use_tls,omitempty"`
 }
 
 // NotionConfig holds Notion notification settings
 type NotionConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	Token      string `mapstructure:"token"`       // Notion integration token
-	DatabaseID string `mapstructure:"database_id"` // Notion database ID
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
+	Token      string `mapstructure:"token" yaml:"token,omitempty"`             // Notion integration token
+	DatabaseID string `mapstructure:"database_id" yaml:"database_id,omitempty"` // Notion database ID
 }
 
 // PluginConfig holds HTTP plugin settings
 type PluginConfig struct {
-	Name        string            `mapstructure:"name"`
-	Enabled     bool              `mapstructure:"enabled"`
-	URL         string            `mapstructure:"url"`          // HTTP endpoint to call
-	Method      string            `mapstructure:"method"`       // HTTP method (POST, PUT, etc.)
-	Headers     map[string]string `mapstructure:"headers"`      // Custom headers
-	Timeout     time.Duration     `mapstructure:"timeout"`      // Request timeout
-	RetryCount  int               `mapstructure:"retry_count"`  // Number of retries
-	RetryDelay  time.Duration     `mapstructure:"retry_delay"`  // Delay between retries
+	Name       string            `mapstructure:"name" yaml:"name"`
+	Enabled    bool              `mapstructure:"enabled" yaml:"enabled"`
+	URL        string            `mapstructure:"url" yaml:"url,omitempty"`               // HTTP endpoint to call
+	Method     string            `mapstructure:"method" yaml:"method,omitempty"`         // HTTP method (POST, PUT, etc.)
+	Headers    map[string]string `mapstructure:"headers" yaml:"headers,omitempty"`       // Custom headers
+	Timeout    time.Duration     `mapstructure:"timeout" yaml:"timeout,omitempty"`       // Request timeout
+	RetryCount int               `mapstructure:"retry_count" yaml:"retry_count,omitempty"` // Number of retries
+	RetryDelay time.Duration     `mapstructure:"retry_delay" yaml:"retry_delay,omitempty"` // Delay between retries
 }
 
 // GetLocation returns the time.Location for the configured timezone
@@ -191,25 +192,25 @@ func parseDurationWithDays(s string, defaultVal time.Duration) time.Duration {
 }
 
 type ServerConfig struct {
-	Port int `mapstructure:"port"`
+	Port int `mapstructure:"port" yaml:"port"`
 }
 
 type StorageConfig struct {
-	Path string `mapstructure:"path"`
+	Path string `mapstructure:"path" yaml:"path"`
 }
 
 type TargetConfig struct {
-	Name      string           `mapstructure:"name"`
-	Type      string           `mapstructure:"type"`
-	Endpoint  string           `mapstructure:"endpoint"`
-	Interval  time.Duration    `mapstructure:"interval"`
-	Group     string           `mapstructure:"group"` // Environment group: dev, staging, prod, etc.
-	Instances []InstanceConfig `mapstructure:"instances"`
+	Name      string           `mapstructure:"name" yaml:"name"`
+	Type      string           `mapstructure:"type" yaml:"type"`
+	Endpoint  string           `mapstructure:"endpoint" yaml:"endpoint,omitempty"`
+	Interval  time.Duration    `mapstructure:"interval" yaml:"interval"`
+	Group     string           `mapstructure:"group" yaml:"group,omitempty"` // Environment group: dev, staging, prod, etc.
+	Instances []InstanceConfig `mapstructure:"instances" yaml:"instances,omitempty"`
 }
 
 type InstanceConfig struct {
-	ID       string `mapstructure:"id"`
-	Endpoint string `mapstructure:"endpoint"`
+	ID       string `mapstructure:"id" yaml:"id"`
+	Endpoint string `mapstructure:"endpoint" yaml:"endpoint"`
 }
 
 // GetInstances returns instances for this target (backward compatible)
@@ -414,4 +415,113 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// SaveConfig saves the current configuration to file
+func (m *Manager) SaveConfig() error {
+	m.mu.RLock()
+	cfg := m.config
+	callbacks := m.callbacks
+	m.mu.RUnlock()
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(m.configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	// Update hash to prevent duplicate reload from file watcher
+	m.updateHash()
+
+	log.Printf("Config saved to %s", m.configPath)
+
+	// Immediately notify callbacks about the config change
+	// (file watcher won't trigger because hash was updated)
+	log.Printf("Notifying %d config callbacks after save", len(callbacks))
+	for _, cb := range callbacks {
+		cb(cfg)
+	}
+
+	return nil
+}
+
+// AddTarget adds a new target to the configuration
+func (m *Manager) AddTarget(target TargetConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check for duplicate name
+	for _, t := range m.config.Targets {
+		if t.Name == target.Name {
+			return fmt.Errorf("target with name '%s' already exists", target.Name)
+		}
+	}
+
+	m.config.Targets = append(m.config.Targets, target)
+	return nil
+}
+
+// UpdateTarget updates an existing target
+func (m *Manager) UpdateTarget(name string, target TargetConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i, t := range m.config.Targets {
+		if t.Name == name {
+			// If name changed, check for duplicates
+			if target.Name != name {
+				for _, other := range m.config.Targets {
+					if other.Name == target.Name {
+						return fmt.Errorf("target with name '%s' already exists", target.Name)
+					}
+				}
+			}
+			m.config.Targets[i] = target
+			return nil
+		}
+	}
+
+	return fmt.Errorf("target '%s' not found", name)
+}
+
+// DeleteTarget removes a target from the configuration
+func (m *Manager) DeleteTarget(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i, t := range m.config.Targets {
+		if t.Name == name {
+			m.config.Targets = append(m.config.Targets[:i], m.config.Targets[i+1:]...)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("target '%s' not found", name)
+}
+
+// GetTarget returns a target by name
+func (m *Manager) GetTarget(name string) (*TargetConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, t := range m.config.Targets {
+		if t.Name == name {
+			return &t, nil
+		}
+	}
+
+	return nil, fmt.Errorf("target '%s' not found", name)
+}
+
+// GetAllTargets returns all targets
+func (m *Manager) GetAllTargets() []TargetConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]TargetConfig, len(m.config.Targets))
+	copy(result, m.config.Targets)
+	return result
 }

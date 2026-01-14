@@ -190,14 +190,6 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
         <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: colors.text }}>
           {selectedGroup ? `${selectedGroup} Group` : 'All Targets'} Overview
         </h2>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <ActionButton active={globalView === 'trend'} onClick={() => onGlobalToggle('trend')}>
-            Trends
-          </ActionButton>
-          <ActionButton active={globalView === 'heatmap'} onClick={() => onGlobalToggle('heatmap')}>
-            Heatmaps
-          </ActionButton>
-        </div>
       </div>
 
       {/* Aggregate Stats Panel */}
@@ -206,9 +198,96 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
       {/* Comparison Section */}
       {data.targets.length > 1 && (
         <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${colors.border}` }}>
+          {/* Chart Section - Show Chart + Export All together */}
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: showComparisonChart ? '12px' : '0' }}>
+              <ActionButton active={showComparisonChart} onClick={() => setShowComparisonChart(!showComparisonChart)}>
+                {showComparisonChart ? 'Hide Chart' : 'Show Chart'}
+              </ActionButton>
+              <button
+                onClick={() => setShowBulkExport(true)}
+                style={{
+                  padding: '6px 12px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  backgroundColor: '#22c55e',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                }}
+              >
+                Export All
+              </button>
+            </div>
+
+            {/* Comparison Chart - directly below Show Chart button */}
+            {showComparisonChart && (
+              <>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {[
+                      { value: '1h', label: '1h' },
+                      { value: '6h', label: '6h' },
+                      { value: '24h', label: '24h' },
+                      { value: '168h', label: '7d' },
+                      { value: '720h', label: '30d' },
+                      { value: '1008h', label: '6w' },
+                    ].map((r) => (
+                      <button
+                        key={r.value}
+                        onClick={() => setComparisonRange(r.value)}
+                        style={{
+                          padding: '4px 10px',
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: '4px',
+                          backgroundColor: comparisonRange === r.value ? '#3b82f6' : colors.bgCard,
+                          color: comparisonRange === r.value ? '#fff' : colors.text,
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ width: '1px', backgroundColor: colors.border }} />
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {[
+                      { key: 'usage', label: 'Pool Usage' },
+                      { key: 'cpu', label: 'CPU' },
+                      { key: 'heap', label: 'Heap' },
+                      { key: 'threads', label: 'Threads' },
+                    ].map((m) => (
+                      <button
+                        key={m.key}
+                        onClick={() => setChartMetric(m.key as typeof chartMetric)}
+                        style={{
+                          padding: '4px 10px',
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: '4px',
+                          backgroundColor: chartMetric === m.key ? '#8b5cf6' : colors.bgCard,
+                          color: chartMetric === m.key ? '#fff' : colors.text,
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ComparisonChart targetNames={targetNames} range={comparisonRange} metric={chartMetric} />
+              </>
+            )}
+          </div>
+
+          {/* Cards Section Header - View Mode + Trends/Heatmaps together */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '11px', color: colors.textSecondary }}>Comparison</div>
+              <div style={{ fontSize: '11px', color: colors.textSecondary }}>Targets</div>
               {/* View Mode Toggle */}
               <div style={{ display: 'flex', gap: '2px', backgroundColor: colors.bgSecondary, borderRadius: '6px', padding: '2px' }}>
                 <button
@@ -262,24 +341,15 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
                 </button>
               </div>
             </div>
-            <ActionButton active={showComparisonChart} onClick={() => setShowComparisonChart(!showComparisonChart)}>
-              {showComparisonChart ? 'Hide Chart' : 'Show Chart'}
-            </ActionButton>
-            <button
-              onClick={() => setShowBulkExport(true)}
-              style={{
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: '6px',
-                backgroundColor: '#22c55e',
-                color: '#fff',
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: 500,
-              }}
-            >
-              Export All
-            </button>
+            {/* Trends/Heatmaps - right above the cards */}
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <ActionButton active={globalView === 'trend'} onClick={() => onGlobalToggle('trend')}>
+                Trends
+              </ActionButton>
+              <ActionButton active={globalView === 'heatmap'} onClick={() => onGlobalToggle('heatmap')}>
+                Heatmaps
+              </ActionButton>
+            </div>
           </div>
 
           {/* Hexagon View */}
@@ -447,68 +517,6 @@ export function Overview({ globalView, onGlobalToggle, targetOrder, onTargetOrde
               detailRange={detailRange}
               setDetailRange={setDetailRange}
             />
-          )}
-
-          {/* Comparison Chart */}
-          {showComparisonChart && (
-            <div style={{ marginTop: '16px' }}>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                  {[
-                    { value: '1h', label: '1h' },
-                    { value: '6h', label: '6h' },
-                    { value: '24h', label: '24h' },
-                    { value: '168h', label: '7d' },
-                    { value: '720h', label: '30d' },
-                    { value: '1008h', label: '6w' },
-                  ].map((r) => (
-                    <button
-                      key={r.value}
-                      onClick={() => setComparisonRange(r.value)}
-                      style={{
-                        padding: '4px 10px',
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '4px',
-                        backgroundColor: comparisonRange === r.value ? '#3b82f6' : colors.bgCard,
-                        color: comparisonRange === r.value ? '#fff' : colors.text,
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ width: '1px', backgroundColor: colors.border }} />
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {[
-                    { key: 'usage', label: 'Pool Usage' },
-                    { key: 'cpu', label: 'CPU' },
-                    { key: 'heap', label: 'Heap' },
-                    { key: 'threads', label: 'Threads' },
-                  ].map((m) => (
-                    <button
-                      key={m.key}
-                      onClick={() => setChartMetric(m.key as typeof chartMetric)}
-                      style={{
-                        padding: '4px 10px',
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '4px',
-                        backgroundColor: chartMetric === m.key ? '#8b5cf6' : colors.bgCard,
-                        color: chartMetric === m.key ? '#fff' : colors.text,
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <ComparisonChart targetNames={targetNames} range={comparisonRange} metric={chartMetric} />
-            </div>
           )}
         </div>
       )}

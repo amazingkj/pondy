@@ -5,12 +5,19 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html/template"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
 
 	"github.com/jiin/pondy/internal/config"
 	"github.com/jiin/pondy/internal/models"
+)
+
+const (
+	// Email sending timeout
+	emailDialTimeout = 10 * time.Second
+	emailSendTimeout = 30 * time.Second
 )
 
 // EmailChannel sends alerts via SMTP email
@@ -83,7 +90,59 @@ func (e *EmailChannel) sendEmail(subject, body string) error {
 		return e.sendWithTLS(addr, auth, msg.Bytes())
 	}
 
-	return smtp.SendMail(addr, auth, e.cfg.From, e.cfg.To, msg.Bytes())
+	return e.sendWithTimeout(addr, auth, msg.Bytes())
+}
+
+// sendWithTimeout sends email without TLS but with connection timeout
+func (e *EmailChannel) sendWithTimeout(addr string, auth smtp.Auth, msg []byte) error {
+	// Dial with timeout
+	conn, err := net.DialTimeout("tcp", addr, emailDialTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
+	}
+	defer conn.Close()
+
+	// Set deadline for entire send operation
+	if err := conn.SetDeadline(time.Now().Add(emailSendTimeout)); err != nil {
+		return fmt.Errorf("failed to set connection deadline: %w", err)
+	}
+
+	client, err := smtp.NewClient(conn, e.cfg.SMTPHost)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("SMTP authentication failed: %w", err)
+		}
+	}
+
+	if err := client.Mail(e.cfg.From); err != nil {
+		return fmt.Errorf("SMTP MAIL command failed: %w", err)
+	}
+
+	for _, to := range e.cfg.To {
+		if err := client.Rcpt(to); err != nil {
+			return fmt.Errorf("SMTP RCPT command failed for %s: %w", to, err)
+		}
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("SMTP DATA command failed: %w", err)
+	}
+
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("failed to write email body: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed to close email body: %w", err)
+	}
+
+	return client.Quit()
 }
 
 func (e *EmailChannel) sendWithTLS(addr string, auth smtp.Auth, msg []byte) error {
@@ -91,45 +150,52 @@ func (e *EmailChannel) sendWithTLS(addr string, auth smtp.Auth, msg []byte) erro
 		ServerName: e.cfg.SMTPHost,
 	}
 
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	// Use dial with timeout to prevent hanging
+	dialer := &net.Dialer{Timeout: emailDialTimeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
 	defer conn.Close()
 
+	// Set deadline for entire send operation
+	if err := conn.SetDeadline(time.Now().Add(emailSendTimeout)); err != nil {
+		return fmt.Errorf("failed to set connection deadline: %w", err)
+	}
+
 	client, err := smtp.NewClient(conn, e.cfg.SMTPHost)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create SMTP client: %w", err)
 	}
 	defer client.Close()
 
 	if auth != nil {
 		if err := client.Auth(auth); err != nil {
-			return err
+			return fmt.Errorf("SMTP authentication failed: %w", err)
 		}
 	}
 
 	if err := client.Mail(e.cfg.From); err != nil {
-		return err
+		return fmt.Errorf("SMTP MAIL command failed: %w", err)
 	}
 
 	for _, to := range e.cfg.To {
 		if err := client.Rcpt(to); err != nil {
-			return err
+			return fmt.Errorf("SMTP RCPT command failed for %s: %w", to, err)
 		}
 	}
 
 	w, err := client.Data()
 	if err != nil {
-		return err
+		return fmt.Errorf("SMTP DATA command failed: %w", err)
 	}
 
 	if _, err := w.Write(msg); err != nil {
-		return err
+		return fmt.Errorf("failed to write email body: %w", err)
 	}
 
 	if err := w.Close(); err != nil {
-		return err
+		return fmt.Errorf("failed to close email body: %w", err)
 	}
 
 	return client.Quit()

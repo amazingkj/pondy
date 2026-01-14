@@ -7,6 +7,8 @@ import { SettingsPanel } from './SettingsPanel';
 import { useTheme } from '../context/ThemeContext';
 import { useKeyboardShortcuts, useShortcutsHelp } from '../hooks/useKeyboardShortcuts';
 import { ShortcutsHelp } from './ShortcutsHelp';
+import { DashboardSkeleton } from './Skeleton';
+import { NoTargetsEmpty, ErrorEmpty } from './EmptyState';
 
 export type GlobalView = 'trend' | 'recs' | 'leaks' | 'peakTime' | 'anomalies' | 'heatmap' | null;
 
@@ -284,29 +286,17 @@ export function Dashboard() {
       </header>
 
       <main style={{ padding: '16px' }}>
-        {loading && !data && (
-          <div style={{ textAlign: 'center', padding: '60px', color: colors.textSecondary }}>
-            Loading...
-          </div>
-        )}
+        {loading && !data && <DashboardSkeleton />}
 
-        {error && (
-          <div
-            style={{
-              padding: '16px',
-              backgroundColor: '#fee2e2',
-              borderRadius: '8px',
-              color: '#991b1b',
-            }}
-          >
-            Error: {error}
-          </div>
+        {error && !loading && (
+          <ErrorEmpty
+            message={error}
+            onRetry={() => window.location.reload()}
+          />
         )}
 
         {data && data.targets.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '60px', color: colors.textSecondary }}>
-            No targets configured
-          </div>
+          <NoTargetsEmpty onAddTarget={() => setShowSettings(true)} />
         )}
 
         {data && data.targets.length > 0 && (

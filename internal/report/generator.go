@@ -114,9 +114,15 @@ func BuildReportData(targetName string, rangeStr string, metrics []models.PoolMe
 	return *data
 }
 
+// Template helper functions
+var templateFuncs = template.FuncMap{
+	"add": func(a, b int) int { return a + b },
+	"sub": func(a, b int) int { return a - b },
+}
+
 // GenerateHTMLReport generates an HTML report
 func GenerateHTMLReport(data *ReportData) ([]byte, error) {
-	tmpl, err := template.New("report").Parse(reportTemplate)
+	tmpl, err := template.New("report").Funcs(templateFuncs).Parse(reportTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +154,7 @@ func GenerateCombinedHTMLReport(reports []ReportData, rangeStr string, loc *time
 		Reports:     reports,
 	}
 
-	tmpl, err := template.New("combined").Parse(combinedReportTemplate)
+	tmpl, err := template.New("combined").Funcs(templateFuncs).Parse(combinedReportTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +172,7 @@ const reportTemplate = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <title>Pondy Report - {{.TargetName}}</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Cpath d='M30 35h40v30H30z' fill='%23fff'/%3E%3Ccircle cx='40' cy='50' r='6' fill='%233b82f6'/%3E%3Ccircle cx='60' cy='50' r='6' fill='%233b82f6'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%233b82f6'/%3E%3Cstop offset='100%25' style='stop-color:%231d4ed8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='14' fill='url(%23grad)'/%3E%3Ccircle cx='10' cy='12' r='3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='22' cy='12' r='3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='16' cy='20' r='3' fill='%23fff' opacity='0.9'/%3E%3Cline x1='10' y1='12' x2='16' y2='20' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3Cline x1='22' y1='12' x2='16' y2='20' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3Cline x1='10' y1='12' x2='22' y2='12' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3C/svg%3E">
     <style>
         * { box-sizing: border-box; }
         body {
@@ -395,12 +401,21 @@ const reportTemplate = `<!DOCTYPE html>
         {{end}}
 
         {{if .Anomalies}}
-        <h2>Anomalies ({{len .Anomalies}})</h2>
-        {{range .Anomalies}}
-        <div class="anomaly anomaly-{{.Severity}}">
-            <span class="anomaly-type">{{.Type}}</span>: {{.Message}}
-            <span style="color: #6b7280;">({{.Timestamp.Format "15:04"}})</span>
+        <h2>Anomalies
+            {{with index .Anomalies 0}}
+            <span style="font-weight: normal; font-size: 14px; color: #6b7280;">
+                ({{.Timestamp.Format "01/02 15:04"}}{{if gt (len $.Anomalies) 1}} ~ {{(index $.Anomalies (add (len $.Anomalies) -1)).Timestamp.Format "01/02 15:04"}}{{end}}, {{len $.Anomalies}} events)
+            </span>
+            {{end}}
+        </h2>
+        {{range $i, $a := .Anomalies}}{{if lt $i 20}}
+        <div class="anomaly anomaly-{{$a.Severity}}">
+            <span class="anomaly-type">{{$a.Type}}</span>: {{$a.Message}}
+            <span style="color: #6b7280;">({{$a.Timestamp.Format "01/02 15:04"}})</span>
         </div>
+        {{end}}{{end}}
+        {{if gt (len .Anomalies) 20}}
+        <div class="no-data" style="margin-top: 8px;">... and {{sub (len .Anomalies) 20}} more anomalies</div>
         {{end}}
         {{end}}
 
@@ -439,7 +454,7 @@ const combinedReportTemplate = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <title>Pondy Combined Report</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%233b82f6'/%3E%3Cpath d='M30 35h40v30H30z' fill='%23fff'/%3E%3Ccircle cx='40' cy='50' r='6' fill='%233b82f6'/%3E%3Ccircle cx='60' cy='50' r='6' fill='%233b82f6'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%233b82f6'/%3E%3Cstop offset='100%25' style='stop-color:%231d4ed8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='14' fill='url(%23grad)'/%3E%3Ccircle cx='10' cy='12' r='3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='22' cy='12' r='3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='16' cy='20' r='3' fill='%23fff' opacity='0.9'/%3E%3Cline x1='10' y1='12' x2='16' y2='20' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3Cline x1='22' y1='12' x2='16' y2='20' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3Cline x1='10' y1='12' x2='22' y2='12' stroke='%23fff' stroke-width='1.5' opacity='0.6'/%3E%3C/svg%3E">
     <style>
         * { box-sizing: border-box; }
         body {
@@ -677,14 +692,21 @@ const combinedReportTemplate = `<!DOCTYPE html>
             {{end}}
 
             {{if .Anomalies}}
-            <h2>Anomalies ({{len .Anomalies}})</h2>
+            <h2>Anomalies
+                {{with index .Anomalies 0}}
+                <span style="font-weight: normal; font-size: 12px; color: #6b7280;">
+                    ({{.Timestamp.Format "01/02 15:04"}}{{if gt (len $.Anomalies) 1}} ~ {{(index $.Anomalies (sub (len $.Anomalies) 1)).Timestamp.Format "01/02 15:04"}}{{end}}, {{len $.Anomalies}} events)
+                </span>
+                {{end}}
+            </h2>
             {{range $i, $a := .Anomalies}}{{if lt $i 5}}
             <div class="anomaly anomaly-{{$a.Severity}}">
                 <span class="anomaly-type">{{$a.Type}}</span>: {{$a.Message}}
+                <span style="color: #6b7280; font-size: 11px;">({{$a.Timestamp.Format "01/02 15:04"}})</span>
             </div>
             {{end}}{{end}}
             {{if gt (len .Anomalies) 5}}
-            <div class="no-data">+{{len .Anomalies | printf "%d"}} more anomalies</div>
+            <div class="no-data">... and {{sub (len .Anomalies) 5}} more anomalies</div>
             {{end}}
             {{end}}
 

@@ -86,6 +86,29 @@ type Storage interface {
 	// RestoreBackup restores the database from a backup file
 	RestoreBackup(srcPath string) error
 
+	// MaintenanceWindow-related methods
+
+	// SaveMaintenanceWindow creates a new maintenance window
+	SaveMaintenanceWindow(window *models.MaintenanceWindow) error
+
+	// UpdateMaintenanceWindow updates an existing maintenance window
+	UpdateMaintenanceWindow(window *models.MaintenanceWindow) error
+
+	// DeleteMaintenanceWindow deletes a maintenance window by ID
+	DeleteMaintenanceWindow(id int64) error
+
+	// GetMaintenanceWindow returns a maintenance window by ID
+	GetMaintenanceWindow(id int64) (*models.MaintenanceWindow, error)
+
+	// GetAllMaintenanceWindows returns all maintenance windows
+	GetAllMaintenanceWindows() ([]models.MaintenanceWindow, error)
+
+	// GetActiveMaintenanceWindows returns currently active maintenance windows
+	GetActiveMaintenanceWindows() ([]models.MaintenanceWindow, error)
+
+	// IsInMaintenanceWindow checks if a target is in maintenance
+	IsInMaintenanceWindow(targetName string) (bool, error)
+
 	// Close closes the storage connection
 	Close() error
 }

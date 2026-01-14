@@ -18,15 +18,18 @@ const RANGE_OPTIONS = [
 export function BulkExportModal({ onClose }: BulkExportModalProps) {
   const { colors } = useTheme();
   const [range, setRange] = useState('24h');
+  const [exporting, setExporting] = useState<'csv' | 'report' | null>(null);
 
   const handleExportAll = () => {
+    setExporting('csv');
     exportAllCSV(range);
-    onClose();
+    setTimeout(onClose, 300);
   };
 
   const handleCombinedReport = () => {
+    setExporting('report');
     openCombinedReport(range);
-    onClose();
+    setTimeout(onClose, 300);
   };
 
   return (
@@ -94,6 +97,7 @@ export function BulkExportModal({ onClose }: BulkExportModalProps) {
         <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
           <button
             onClick={handleExportAll}
+            disabled={exporting !== null}
             style={{
               flex: 1,
               padding: '10px 16px',
@@ -101,15 +105,17 @@ export function BulkExportModal({ onClose }: BulkExportModalProps) {
               borderRadius: '6px',
               backgroundColor: '#22c55e',
               color: '#fff',
-              cursor: 'pointer',
+              cursor: exporting ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               fontWeight: 600,
+              opacity: exporting ? 0.7 : 1,
             }}
           >
-            Export All CSV
+            {exporting === 'csv' ? 'Opening...' : 'Export All CSV'}
           </button>
           <button
             onClick={handleCombinedReport}
+            disabled={exporting !== null}
             style={{
               flex: 1,
               padding: '10px 16px',
@@ -117,12 +123,13 @@ export function BulkExportModal({ onClose }: BulkExportModalProps) {
               borderRadius: '6px',
               backgroundColor: '#3b82f6',
               color: '#fff',
-              cursor: 'pointer',
+              cursor: exporting ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               fontWeight: 600,
+              opacity: exporting ? 0.7 : 1,
             }}
           >
-            Combined Report
+            {exporting === 'report' ? 'Opening...' : 'Combined Report'}
           </button>
         </div>
 

@@ -3,6 +3,20 @@ import type { TargetsResponse, HistoryResponse, AnalysisResult, LeakAnalysisResu
 
 const API_BASE = '/api';
 
+// Helper to extract error message from API response
+async function extractErrorMessage(res: Response, defaultMessage: string): Promise<string> {
+  try {
+    const json = await res.json();
+    if (json.error) {
+      // Include status code for better debugging
+      return `${json.error} (${res.status} ${json.status || res.statusText})`;
+    }
+  } catch {
+    // JSON parsing failed
+  }
+  return `${defaultMessage} (${res.status} ${res.statusText})`;
+}
+
 // Hook to check if the page is visible
 function usePageVisibility() {
   const [isVisible, setIsVisible] = useState(!document.hidden);
@@ -120,18 +134,33 @@ export function formatDateTime(timestamp: string | undefined | null, timezone: s
   }
 }
 
-export function useTargets(refreshInterval = 5000) {
-  const [data, setData] = useState<TargetsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+export function useTargets(refreshInterval = 10000) {
+  const [data, setData] = useState<TargetsResponse | null>(targetsCache.data);
+  const [loading, setLoading] = useState(!targetsCache.data);
   const [error, setError] = useState<string | null>(null);
   const isVisible = usePageVisibility();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTargets = useCallback(async () => {
+    // Return cached data if still fresh
+    if (targetsCache.data && Date.now() - targetsCache.timestamp < TARGETS_CACHE_TTL) {
+      setData(targetsCache.data);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/targets`);
-      if (!res.ok) throw new Error('Failed to fetch targets');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch targets');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
+
+      // Update cache
+      targetsCache.data = json;
+      targetsCache.timestamp = Date.now();
+
       setData(json);
       setError(null);
     } catch (err) {
@@ -147,17 +176,21 @@ export function useTargets(refreshInterval = 5000) {
 
   // Pause polling when tab is not visible
   useEffect(() => {
+    // Always clear existing interval first to prevent memory leaks
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
     if (isVisible) {
       fetchTargets(); // Refresh immediately when becoming visible
       intervalRef.current = setInterval(fetchTargets, refreshInterval);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
     }
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, [isVisible, fetchTargets, refreshInterval]);
@@ -167,8 +200,12 @@ export function useTargets(refreshInterval = 5000) {
 
 // History cache with TTL
 const historyCache = new Map<string, { data: HistoryResponse; timestamp: number }>();
-const HISTORY_CACHE_TTL = 5000; // 5 seconds
+const HISTORY_CACHE_TTL = 10000; // 10 seconds - extended for better performance
 const MAX_CHART_POINTS = 200; // Maximum data points for smooth rendering
+
+// Targets cache with TTL
+const targetsCache: { data: TargetsResponse | null; timestamp: number } = { data: null, timestamp: 0 };
+const TARGETS_CACHE_TTL = 3000; // 3 seconds - short TTL for freshness but reduces duplicate requests
 
 // Downsample data for better chart performance
 function downsampleData(datapoints: HistoryResponse['datapoints'], maxPoints: number): HistoryResponse['datapoints'] {
@@ -222,7 +259,10 @@ export function useHistory(targetName: string, range = '1h') {
       const res = await fetch(`${API_BASE}/targets/${targetName}/history?range=${range}`, {
         signal: abortControllerRef.current.signal,
       });
-      if (!res.ok) throw new Error('Failed to fetch history');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch history');
+        throw new Error(errMsg);
+      }
       const json: HistoryResponse = await res.json();
 
       // Downsample data for better performance
@@ -257,18 +297,22 @@ export function useHistory(targetName: string, range = '1h') {
 
   // Pause polling when tab is not visible
   useEffect(() => {
+    // Always clear existing interval first to prevent memory leaks
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
     if (!targetName) return;
 
     if (isVisible) {
       intervalRef.current = setInterval(fetchHistory, 10000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
     }
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, [isVisible, fetchHistory, targetName]);
@@ -286,7 +330,10 @@ export function useRecommendations(targetName: string, enabled = false) {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/targets/${targetName}/recommendations?range=1h`);
-      if (!res.ok) throw new Error('Failed to fetch recommendations');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch recommendations');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -314,7 +361,10 @@ export function useLeakDetection(targetName: string, enabled = false) {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/targets/${targetName}/leaks?range=1h`);
-      if (!res.ok) throw new Error('Failed to detect leaks');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to detect leaks');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -362,7 +412,10 @@ export function usePeakTime(targetName: string, enabled = false) {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/targets/${targetName}/peaktime?range=24h`);
-      if (!res.ok) throw new Error('Failed to fetch peak time analysis');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch peak time analysis');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -408,7 +461,10 @@ export function useAnomalies(
         `${API_BASE}/targets/${targetName}/anomalies?range=${range}&sensitivity=${sensitivity}`,
         { signal: abortControllerRef.current.signal }
       );
-      if (!res.ok) throw new Error('Failed to detect anomalies');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to detect anomalies');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -521,7 +577,10 @@ export function useComparison(targetName: string, period: 'day' | 'week' = 'day'
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/targets/${targetName}/compare?period=${period}`);
-      if (!res.ok) throw new Error('Failed to fetch comparison');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch comparison');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -554,7 +613,10 @@ export function useAlerts(status?: string, limit = 100) {
         url += `&status=${status}`;
       }
       const res = await fetch(url);
-      if (!res.ok) throw new Error('Failed to fetch alerts');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch alerts');
+        throw new Error(errMsg);
+      }
       const json: AlertsResponse = await res.json();
       setData(json.alerts || []);
       setError(null);
@@ -571,16 +633,20 @@ export function useAlerts(status?: string, limit = 100) {
 
   // Pause polling when tab is not visible
   useEffect(() => {
-    if (isVisible) {
-      intervalRef.current = setInterval(fetchAlerts, 10000);
-    } else if (intervalRef.current) {
+    // Always clear existing interval first to prevent memory leaks
+    if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+
+    if (isVisible) {
+      intervalRef.current = setInterval(fetchAlerts, 10000);
     }
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, [isVisible, fetchAlerts]);
@@ -598,7 +664,10 @@ export function useActiveAlerts() {
   const fetchActiveAlerts = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/alerts/active`);
-      if (!res.ok) throw new Error('Failed to fetch active alerts');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch active alerts');
+        throw new Error(errMsg);
+      }
       const json: AlertsResponse = await res.json();
       setData(json.alerts || []);
       setError(null);
@@ -613,18 +682,22 @@ export function useActiveAlerts() {
     fetchActiveAlerts();
   }, [fetchActiveAlerts]);
 
-  // Poll more frequently for active alerts
+  // Poll for active alerts (10s interval for better performance)
   useEffect(() => {
-    if (isVisible) {
-      intervalRef.current = setInterval(fetchActiveAlerts, 5000);
-    } else if (intervalRef.current) {
+    // Always clear existing interval first to prevent memory leaks
+    if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+
+    if (isVisible) {
+      intervalRef.current = setInterval(fetchActiveAlerts, 10000);
     }
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, [isVisible, fetchActiveAlerts]);
@@ -640,7 +713,10 @@ export function useAlertStats() {
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/alerts/stats`);
-      if (!res.ok) throw new Error('Failed to fetch alert stats');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch alert stats');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -709,7 +785,10 @@ export function useAlertRules() {
   const fetchRules = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/rules`);
-      if (!res.ok) throw new Error('Failed to fetch rules');
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch rules');
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       setData(json);
       setError(null);
@@ -816,5 +895,111 @@ export async function restoreBackup(file: File): Promise<{ message: string } | {
     return { message: json.message || 'Backup restored successfully' };
   } catch {
     return { error: 'Failed to upload backup file' };
+  }
+}
+
+// Maintenance Window hooks
+import type { MaintenanceWindow, MaintenanceWindowInput, MaintenanceWindowsResponse } from '../types/metrics';
+
+export function useMaintenanceWindows() {
+  const [data, setData] = useState<MaintenanceWindowsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchWindows = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/maintenance`);
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch maintenance windows');
+        throw new Error(errMsg);
+      }
+      const json = await res.json();
+      setData(json);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWindows();
+  }, [fetchWindows]);
+
+  return { data, loading, error, refetch: fetchWindows };
+}
+
+export function useActiveMaintenanceWindows() {
+  const [data, setData] = useState<MaintenanceWindow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchWindows = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/maintenance/active`);
+      if (!res.ok) {
+        const errMsg = await extractErrorMessage(res, 'Failed to fetch active maintenance windows');
+        throw new Error(errMsg);
+      }
+      const json: MaintenanceWindowsResponse = await res.json();
+      setData(json.windows || []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWindows();
+  }, [fetchWindows]);
+
+  return { data, loading, error, refetch: fetchWindows };
+}
+
+export async function createMaintenanceWindow(input: MaintenanceWindowInput): Promise<MaintenanceWindow | null> {
+  try {
+    const res = await fetch(`${API_BASE}/maintenance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to create maintenance window');
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('Create maintenance window error:', err);
+    throw err;
+  }
+}
+
+export async function updateMaintenanceWindow(id: number, input: MaintenanceWindowInput): Promise<MaintenanceWindow | null> {
+  try {
+    const res = await fetch(`${API_BASE}/maintenance/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to update maintenance window');
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('Update maintenance window error:', err);
+    throw err;
+  }
+}
+
+export async function deleteMaintenanceWindow(id: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/maintenance/${id}`, { method: 'DELETE' });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

@@ -3,6 +3,7 @@ package alerter
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"text/template"
@@ -59,6 +60,66 @@ func NewRuleContext(m *models.PoolMetrics) *RuleContext {
 	}
 
 	return ctx
+}
+
+// ValidateCondition validates a rule condition syntax without evaluating it
+// Returns nil if valid, error otherwise
+func ValidateCondition(condition string) error {
+	condition = strings.TrimSpace(condition)
+	if condition == "" {
+		return fmt.Errorf("condition cannot be empty")
+	}
+
+	// Parse the condition
+	parts := parseCondition(condition)
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid condition format: expected 'variable operator value', got '%s'", condition)
+	}
+
+	varName := strings.ToLower(parts[0])
+	operator := parts[1]
+	valueStr := parts[2]
+
+	// Validate variable name
+	validVars := []string{
+		"usage", "active", "idle", "pending", "max", "timeout",
+		"heapusage", "heap_usage", "heapused", "heap_used", "heapmax", "heap_max",
+		"nonheapused", "non_heap_used", "nonheap",
+		"cpuusage", "cpu_usage", "cpu",
+		"threads", "threads_live",
+		"gccount", "gc_count", "gctime", "gc_time",
+	}
+
+	validVar := false
+	for _, v := range validVars {
+		if varName == v {
+			validVar = true
+			break
+		}
+	}
+	if !validVar {
+		return fmt.Errorf("unknown variable '%s'. Valid variables: usage, active, idle, pending, max, timeout, heapusage, cpuusage, threads, gccount, gctime", varName)
+	}
+
+	// Validate operator
+	validOps := []string{">", ">=", "<", "<=", "==", "!="}
+	validOp := false
+	for _, op := range validOps {
+		if operator == op {
+			validOp = true
+			break
+		}
+	}
+	if !validOp {
+		return fmt.Errorf("unknown operator '%s'. Valid operators: >, >=, <, <=, ==, !=", operator)
+	}
+
+	// Validate value is a number
+	if _, err := strconv.ParseFloat(valueStr, 64); err != nil {
+		return fmt.Errorf("invalid value '%s': must be a number", valueStr)
+	}
+
+	return nil
 }
 
 // EvaluateRule evaluates a rule condition against a context
@@ -152,7 +213,13 @@ func getContextValue(ctx *RuleContext, varName string) (float64, error) {
 }
 
 // evaluateCondition evaluates a comparison
+// Returns false if either value is NaN or Inf to prevent undefined behavior
 func evaluateCondition(left float64, operator string, right float64) (bool, error) {
+	// Guard against NaN and Inf values
+	if math.IsNaN(left) || math.IsInf(left, 0) || math.IsNaN(right) || math.IsInf(right, 0) {
+		return false, nil
+	}
+
 	switch operator {
 	case ">":
 		return left > right, nil

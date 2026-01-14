@@ -119,10 +119,21 @@ func (m *Manager) runCollector(ctx context.Context, c *ActuatorCollector, interv
 	}
 }
 
-// collect performs a single collection
+// CollectionTimeout is the maximum time allowed for a single metric collection
+const CollectionTimeout = 30 * time.Second
+
+// collect performs a single collection with timeout
 func (m *Manager) collect(c *ActuatorCollector) {
-	metrics, err := c.Collect()
+	// Create a context with timeout to prevent goroutine leaks
+	ctx, cancel := context.WithTimeout(context.Background(), CollectionTimeout)
+	defer cancel()
+
+	metrics, err := c.CollectWithContext(ctx)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			log.Printf("Collection timeout for %s/%s after %v", c.Name(), c.InstanceName(), CollectionTimeout)
+			return
+		}
 		if metrics == nil || metrics.Status != "no_pool" {
 			log.Printf("Failed to collect from %s/%s: %v", c.Name(), c.InstanceName(), err)
 			return

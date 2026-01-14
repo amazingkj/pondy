@@ -48,24 +48,47 @@ func formatDuration(d time.Duration) string {
 	return "1h"
 }
 
-// RespondError sends a JSON error response
+// ErrorResponse represents a structured error response
+type ErrorResponse struct {
+	Error      string `json:"error"`
+	StatusCode int    `json:"status_code"`
+	Status     string `json:"status"`
+}
+
+// RespondError sends a JSON error response with status code
 func RespondError(c *gin.Context, statusCode int, message string) {
-	c.JSON(statusCode, gin.H{"error": message})
+	c.JSON(statusCode, ErrorResponse{
+		Error:      message,
+		StatusCode: statusCode,
+		Status:     http.StatusText(statusCode),
+	})
 }
 
 // RespondInternalError sends a 500 error response
 func RespondInternalError(c *gin.Context, err error) {
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	c.JSON(http.StatusInternalServerError, ErrorResponse{
+		Error:      err.Error(),
+		StatusCode: http.StatusInternalServerError,
+		Status:     http.StatusText(http.StatusInternalServerError),
+	})
 }
 
 // RespondNotFound sends a 404 error response
 func RespondNotFound(c *gin.Context, message string) {
-	c.JSON(http.StatusNotFound, gin.H{"error": message})
+	c.JSON(http.StatusNotFound, ErrorResponse{
+		Error:      message,
+		StatusCode: http.StatusNotFound,
+		Status:     http.StatusText(http.StatusNotFound),
+	})
 }
 
 // RespondBadRequest sends a 400 error response
 func RespondBadRequest(c *gin.Context, message string) {
-	c.JSON(http.StatusBadRequest, gin.H{"error": message})
+	c.JSON(http.StatusBadRequest, ErrorResponse{
+		Error:      message,
+		StatusCode: http.StatusBadRequest,
+		Status:     http.StatusText(http.StatusBadRequest),
+	})
 }
 
 // RespondNoData sends a standard "no data available" response

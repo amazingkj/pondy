@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amazingkj/pondy/internal/models"
+	"github.com/jiin/pondy/internal/models"
 )
 
 func setupTestDB(t *testing.T) (*SQLiteStorage, func()) {
@@ -51,7 +51,8 @@ func TestSQLiteStorage_Save(t *testing.T) {
 		AcquireP99:   1.5,
 		HeapUsed:     1024 * 1024 * 100, // 100MB
 		HeapMax:      1024 * 1024 * 512, // 512MB
-		NonHeapUsed:  1024 * 1024 * 50,
+		NonHeapUsed:  1024 * 1024 * 50,  // 50MB
+		NonHeapMax:   1024 * 1024 * 256, // 256MB
 		ThreadsLive:  50,
 		CpuUsage:     0.25,
 		GcCount:      100,
@@ -136,8 +137,10 @@ func TestSQLiteStorage_GetHistory(t *testing.T) {
 		}
 	}
 
-	// Get 1 hour of history
-	history, err := storage.GetHistory("test-target", time.Hour)
+	// Get 1 hour of history (from 1 hour ago to now)
+	from := now.Add(-time.Hour)
+	to := now
+	history, err := storage.GetHistory("test-target", from, to)
 	if err != nil {
 		t.Fatalf("GetHistory() error = %v", err)
 	}
@@ -148,7 +151,7 @@ func TestSQLiteStorage_GetHistory(t *testing.T) {
 	}
 }
 
-func TestSQLiteStorage_DeleteOld(t *testing.T) {
+func TestSQLiteStorage_Cleanup(t *testing.T) {
 	storage, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -174,18 +177,21 @@ func TestSQLiteStorage_DeleteOld(t *testing.T) {
 	storage.Save(oldMetrics)
 	storage.Save(newMetrics)
 
-	// Delete data older than 24 hours
-	deleted, err := storage.DeleteOld(24 * time.Hour)
+	// Delete data older than 24 hours (pass the cutoff time, not duration)
+	olderThan := now.Add(-24 * time.Hour)
+	deleted, err := storage.Cleanup(olderThan)
 	if err != nil {
-		t.Fatalf("DeleteOld() error = %v", err)
+		t.Fatalf("Cleanup() error = %v", err)
 	}
 
 	if deleted != 1 {
 		t.Errorf("expected 1 deleted, got %d", deleted)
 	}
 
-	// Verify only new metrics remain
-	history, _ := storage.GetHistory("test-target", 72*time.Hour)
+	// Verify only new metrics remain (from 72 hours ago to now)
+	from := now.Add(-72 * time.Hour)
+	to := now.Add(time.Hour) // add buffer
+	history, _ := storage.GetHistory("test-target", from, to)
 	if len(history) != 1 {
 		t.Errorf("expected 1 remaining record, got %d", len(history))
 	}

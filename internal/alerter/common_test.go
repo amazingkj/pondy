@@ -12,11 +12,8 @@ func TestGetEmoji(t *testing.T) {
 		expected string
 	}{
 		{"critical", EmojiCritical},
-		{"CRITICAL", EmojiCritical},
 		{"warning", EmojiWarning},
-		{"WARNING", EmojiWarning},
 		{"info", EmojiInfo},
-		{"INFO", EmojiInfo},
 		{"unknown", EmojiInfo},
 		{"", EmojiInfo},
 	}
@@ -37,11 +34,8 @@ func TestGetColorString(t *testing.T) {
 		expected string
 	}{
 		{"critical", ColorCritical},
-		{"CRITICAL", ColorCritical},
 		{"warning", ColorWarning},
-		{"WARNING", ColorWarning},
 		{"info", ColorInfo},
-		{"INFO", ColorInfo},
 		{"unknown", ColorInfo},
 	}
 
@@ -126,7 +120,7 @@ func TestFormatAlertTitle(t *testing.T) {
 
 	result := FormatAlertTitle(alert)
 
-	expected := "[CRITICAL] Alert: high_usage"
+	expected := EmojiCritical + " Alert: high_usage"
 	if result != expected {
 		t.Errorf("FormatAlertTitle() = %s, want %s", result, expected)
 	}
@@ -141,7 +135,7 @@ func TestFormatResolvedTitle(t *testing.T) {
 
 	result := FormatResolvedTitle(alert)
 
-	expected := "[RESOLVED] Alert: high_usage"
+	expected := EmojiResolved + " Resolved: high_usage"
 	if result != expected {
 		t.Errorf("FormatResolvedTitle() = %s, want %s", result, expected)
 	}

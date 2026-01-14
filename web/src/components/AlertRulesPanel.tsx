@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, toggleAlertRule } from '../hooks/useMetrics';
 import type { AlertRule, AlertRuleInput } from '../types/metrics';
+import { useToast } from './Toast';
+import { ConfirmModal } from './ConfirmModal';
+import { TableRowSkeleton } from './Skeleton';
+import { LoadingButton } from './LoadingButton';
 
 const severityColors: Record<string, string> = {
   critical: '#ef4444',
@@ -26,48 +30,68 @@ const conditionVariables = [
 
 export function AlertRulesPanel() {
   const { colors } = useTheme();
+  const toast = useToast();
   const { data, loading, refetch } = useAlertRules();
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<AlertRule | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleCreate = async (input: AlertRuleInput) => {
     try {
-      setError(null);
       await createAlertRule(input);
       setShowForm(false);
       refetch();
+      toast.success('Alert rule created successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create rule');
+      toast.error(err instanceof Error ? err.message : 'Failed to create rule');
     }
   };
 
   const handleUpdate = async (id: number, input: AlertRuleInput) => {
     try {
-      setError(null);
       await updateAlertRule(id, input);
       setEditingRule(null);
       refetch();
+      toast.success('Alert rule updated successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update rule');
+      toast.error(err instanceof Error ? err.message : 'Failed to update rule');
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this rule?')) return;
-    const success = await deleteAlertRule(id);
-    if (success) {
-      refetch();
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    try {
+      const success = await deleteAlertRule(deleteConfirm.id);
+      if (success) {
+        refetch();
+        toast.success('Alert rule deleted');
+      } else {
+        toast.error('Failed to delete rule');
+      }
+    } catch {
+      toast.error('Failed to delete rule');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(null);
     }
   };
 
-  const handleToggle = async (id: number) => {
+  const handleToggle = async (id: number, enabled: boolean) => {
     await toggleAlertRule(id);
     refetch();
+    toast.info(enabled ? 'Rule disabled' : 'Rule enabled');
   };
 
   if (loading) {
-    return <div style={{ padding: '20px', color: colors.textSecondary }}>Loading rules...</div>;
+    return (
+      <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {[1, 2, 3].map((i) => (
+          <TableRowSkeleton key={i} columns={3} />
+        ))}
+      </div>
+    );
   }
 
   const rules = data?.rules || [];
@@ -94,19 +118,6 @@ export function AlertRulesPanel() {
           + Add Rule
         </button>
       </div>
-
-      {error && (
-        <div style={{
-          padding: '12px',
-          backgroundColor: '#fee2e2',
-          color: '#991b1b',
-          borderRadius: '6px',
-          marginBottom: '16px',
-          fontSize: '13px',
-        }}>
-          {error}
-        </div>
-      )}
 
       {/* Form */}
       {(showForm || editingRule) && (
@@ -140,8 +151,8 @@ export function AlertRulesPanel() {
                 key={rule.id}
                 rule={rule}
                 onEdit={() => setEditingRule(rule)}
-                onDelete={() => handleDelete(rule.id)}
-                onToggle={() => handleToggle(rule.id)}
+                onDelete={() => setDeleteConfirm(rule)}
+                onToggle={() => handleToggle(rule.id, rule.enabled)}
               />
             ))}
           </div>
@@ -216,6 +227,19 @@ export function AlertRulesPanel() {
           ))}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!deleteConfirm}
+        title="Delete Alert Rule"
+        message={`Are you sure you want to delete "${deleteConfirm?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        isLoading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }
@@ -282,6 +306,7 @@ function RuleCard({
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
             onClick={onToggle}
+            aria-label={rule.enabled ? `Disable ${rule.name}` : `Enable ${rule.name}`}
             style={{
               padding: '4px 8px',
               border: `1px solid ${colors.border}`,
@@ -296,6 +321,7 @@ function RuleCard({
           </button>
           <button
             onClick={onEdit}
+            aria-label={`Edit ${rule.name}`}
             style={{
               padding: '4px 8px',
               border: `1px solid ${colors.border}`,
@@ -310,6 +336,7 @@ function RuleCard({
           </button>
           <button
             onClick={onDelete}
+            aria-label={`Delete ${rule.name}`}
             style={{
               padding: '4px 8px',
               border: '1px solid #ef4444',
@@ -334,7 +361,7 @@ function RuleForm({
   onCancel,
 }: {
   rule: AlertRule | null;
-  onSubmit: (input: AlertRuleInput) => void;
+  onSubmit: (input: AlertRuleInput) => Promise<void> | void;
   onCancel: () => void;
 }) {
   const { colors } = useTheme();
@@ -343,10 +370,38 @@ function RuleForm({
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>(rule?.severity || 'warning');
   const [message, setMessage] = useState(rule?.message || '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const validate = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!name.trim()) {
+      newErrors.name = 'Name is required';
+    } else if (name.length < 2) {
+      newErrors.name = 'Name must be at least 2 characters';
+    }
+
+    if (!condition.trim()) {
+      newErrors.condition = 'Condition is required';
+    } else if (!/^\w+\s*(>|<|>=|<=|==|!=)\s*\d+$/.test(condition.trim())) {
+      newErrors.condition = 'Invalid format. Use: variable operator value (e.g., usage > 80)';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ name, condition, severity, message, enabled });
+    if (!validate()) return;
+
+    setSubmitting(true);
+    try {
+      await onSubmit({ name, condition, severity, message, enabled });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const inputStyle: React.CSSProperties = {
@@ -384,30 +439,51 @@ function RuleForm({
 
       <div style={{ display: 'grid', gap: '12px' }}>
         <div>
-          <label style={labelStyle}>Name *</label>
+          <label style={labelStyle} htmlFor="rule-name">Name *</label>
           <input
+            id="rule-name"
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); setErrors(prev => ({ ...prev, name: '' })); }}
             placeholder="e.g., high_usage"
-            required
-            style={inputStyle}
+            aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? 'name-error' : undefined}
+            style={{
+              ...inputStyle,
+              borderColor: errors.name ? '#ef4444' : colors.border,
+            }}
           />
+          {errors.name && (
+            <div id="name-error" style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px' }}>
+              {errors.name}
+            </div>
+          )}
         </div>
 
         <div>
-          <label style={labelStyle}>Condition *</label>
+          <label style={labelStyle} htmlFor="rule-condition">Condition *</label>
           <input
+            id="rule-condition"
             type="text"
             value={condition}
-            onChange={(e) => setCondition(e.target.value)}
+            onChange={(e) => { setCondition(e.target.value); setErrors(prev => ({ ...prev, condition: '' })); }}
             placeholder='e.g., usage > 80, pending > 5, idle == 0'
-            required
-            style={inputStyle}
+            aria-invalid={!!errors.condition}
+            aria-describedby={errors.condition ? 'condition-error' : 'condition-hint'}
+            style={{
+              ...inputStyle,
+              borderColor: errors.condition ? '#ef4444' : colors.border,
+            }}
           />
-          <div style={{ fontSize: '11px', color: colors.textSecondary, marginTop: '4px' }}>
-            Format: variable operator value (e.g., usage {'>'} 80)
-          </div>
+          {errors.condition ? (
+            <div id="condition-error" style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px' }}>
+              {errors.condition}
+            </div>
+          ) : (
+            <div id="condition-hint" style={{ fontSize: '11px', color: colors.textSecondary, marginTop: '4px' }}>
+              Format: variable operator value (e.g., usage {'>'} 80)
+            </div>
+          )}
         </div>
 
         <div>
@@ -452,36 +528,23 @@ function RuleForm({
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'flex-end' }}>
-        <button
+        <LoadingButton
           type="button"
           onClick={onCancel}
-          style={{
-            padding: '8px 16px',
-            border: `1px solid ${colors.border}`,
-            borderRadius: '6px',
-            backgroundColor: colors.bgCard,
-            color: colors.text,
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
+          variant="secondary"
+          disabled={submitting}
+          size="sm"
         >
           Cancel
-        </button>
-        <button
+        </LoadingButton>
+        <LoadingButton
           type="submit"
-          style={{
-            padding: '8px 16px',
-            border: 'none',
-            borderRadius: '6px',
-            backgroundColor: '#3b82f6',
-            color: '#fff',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500,
-          }}
+          isLoading={submitting}
+          loadingText={rule ? 'Updating...' : 'Creating...'}
+          size="sm"
         >
           {rule ? 'Update' : 'Create'}
-        </button>
+        </LoadingButton>
       </div>
     </form>
   );

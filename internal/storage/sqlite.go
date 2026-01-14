@@ -34,8 +34,11 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 		return nil, err
 	}
 
-	// Limit to single connection to avoid lock contention
-	db.SetMaxOpenConns(1)
+	// Connection pool settings for better concurrency
+	// SQLite with WAL mode can handle multiple readers
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
 
 	storage := &SQLiteStorage{db: db}
 	if err := storage.migrate(); err != nil {
@@ -63,6 +66,7 @@ func (s *SQLiteStorage) migrate() error {
 		heap_used INTEGER DEFAULT 0,
 		heap_max INTEGER DEFAULT 0,
 		non_heap_used INTEGER DEFAULT 0,
+		non_heap_max INTEGER DEFAULT 0,
 		threads_live INTEGER DEFAULT 0,
 		cpu_usage REAL DEFAULT 0,
 		gc_count INTEGER DEFAULT 0,
@@ -113,6 +117,16 @@ func (s *SQLiteStorage) migrate() error {
 
 	CREATE INDEX IF NOT EXISTS idx_alerts_active
 	ON alerts(target_name, instance_name, rule_name, status);
+
+	-- Optimized index for GetAlertStats combined query
+	CREATE INDEX IF NOT EXISTS idx_alerts_status_severity
+	ON alerts(status, severity);
+
+	CREATE INDEX IF NOT EXISTS idx_alerts_status_target
+	ON alerts(status, target_name);
+
+	CREATE INDEX IF NOT EXISTS idx_alerts_status_rule
+	ON alerts(status, rule_name);
 	`
 	if _, err := s.db.Exec(alertsQuery); err != nil {
 		return err
@@ -135,6 +149,7 @@ func (s *SQLiteStorage) runMigration() {
 		{"heap_used", "INTEGER DEFAULT 0"},
 		{"heap_max", "INTEGER DEFAULT 0"},
 		{"non_heap_used", "INTEGER DEFAULT 0"},
+		{"non_heap_max", "INTEGER DEFAULT 0"},
 		{"threads_live", "INTEGER DEFAULT 0"},
 		{"cpu_usage", "REAL DEFAULT 0"},
 		{"gc_count", "INTEGER DEFAULT 0"},
@@ -176,8 +191,8 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 
 	query := `
 	INSERT INTO pool_metrics (target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		heap_used, heap_max, non_heap_used, non_heap_max, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query,
 		metrics.TargetName,
@@ -192,6 +207,7 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 		metrics.HeapUsed,
 		metrics.HeapMax,
 		metrics.NonHeapUsed,
+		metrics.NonHeapMax,
 		metrics.ThreadsLive,
 		metrics.CpuUsage,
 		metrics.GcCount,
@@ -214,7 +230,7 @@ func (s *SQLiteStorage) Save(metrics *models.PoolMetrics) error {
 func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
+		heap_used, heap_max, non_heap_used, non_heap_max, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ?
 	ORDER BY timestamp DESC
@@ -224,7 +240,7 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 
 	var m models.PoolMetrics
 	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.NonHeapMax, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -237,7 +253,7 @@ func (s *SQLiteStorage) GetLatest(targetName string) (*models.PoolMetrics, error
 func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
+		heap_used, heap_max, non_heap_used, non_heap_max, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ?
 	ORDER BY timestamp DESC
@@ -247,7 +263,7 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 
 	var m models.PoolMetrics
 	err := row.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
+		&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.NonHeapMax, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -260,7 +276,7 @@ func (s *SQLiteStorage) GetLatestByInstance(targetName, instanceName string) (*m
 func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT p.id, p.target_name, p.instance_name, p.status, p.active, p.idle, p.pending, p.max, p.timeout, p.acquire_p99,
-		p.heap_used, p.heap_max, p.non_heap_used, p.threads_live, p.cpu_usage, p.gc_count, p.gc_time, p.young_gc_count, p.old_gc_count, p.timestamp
+		p.heap_used, p.heap_max, p.non_heap_used, p.non_heap_max, p.threads_live, p.cpu_usage, p.gc_count, p.gc_time, p.young_gc_count, p.old_gc_count, p.timestamp
 	FROM pool_metrics p
 	INNER JOIN (
 		SELECT instance_name, MAX(timestamp) as max_ts
@@ -281,7 +297,7 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.NonHeapMax, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -292,7 +308,7 @@ func (s *SQLiteStorage) GetLatestAllInstances(targetName string) ([]models.PoolM
 func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
+		heap_used, heap_max, non_heap_used, non_heap_max, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -307,7 +323,7 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.NonHeapMax, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -318,7 +334,7 @@ func (s *SQLiteStorage) GetHistory(targetName string, from, to time.Time) ([]mod
 func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, from, to time.Time) ([]models.PoolMetrics, error) {
 	query := `
 	SELECT id, target_name, instance_name, status, active, idle, pending, max, timeout, acquire_p99,
-		heap_used, heap_max, non_heap_used, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
+		heap_used, heap_max, non_heap_used, non_heap_max, threads_live, cpu_usage, gc_count, gc_time, young_gc_count, old_gc_count, timestamp
 	FROM pool_metrics
 	WHERE target_name = ? AND instance_name = ? AND timestamp BETWEEN ? AND ?
 	ORDER BY timestamp ASC
@@ -333,7 +349,7 @@ func (s *SQLiteStorage) GetHistoryByInstance(targetName, instanceName string, fr
 	for rows.Next() {
 		var m models.PoolMetrics
 		if err := rows.Scan(&m.ID, &m.TargetName, &m.InstanceName, &m.Status, &m.Active, &m.Idle, &m.Pending, &m.Max, &m.Timeout, &m.AcquireP99,
-			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
+			&m.HeapUsed, &m.HeapMax, &m.NonHeapUsed, &m.NonHeapMax, &m.ThreadsLive, &m.CpuUsage, &m.GcCount, &m.GcTime, &m.YoungGcCount, &m.OldGcCount, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		results = append(results, m)
@@ -532,78 +548,45 @@ func (s *SQLiteStorage) GetAlertStats() (*models.AlertStats, error) {
 		ByRule:     make(map[string]int),
 	}
 
-	// Total and by status
-	query := `SELECT COUNT(*), status FROM alerts GROUP BY status`
+	// Combined query using UNION ALL for better performance (single table scan)
+	query := `
+		SELECT 'status' as type, status as key, COUNT(*) as count FROM alerts GROUP BY status
+		UNION ALL
+		SELECT 'severity', severity, COUNT(*) FROM alerts WHERE status = 'fired' GROUP BY severity
+		UNION ALL
+		SELECT 'target', target_name, COUNT(*) FROM alerts WHERE status = 'fired' GROUP BY target_name
+		UNION ALL
+		SELECT 'rule', rule_name, COUNT(*) FROM alerts WHERE status = 'fired' GROUP BY rule_name
+	`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var count int
-		var status string
-		if err := rows.Scan(&count, &status); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		stats.TotalAlerts += count
-		if status == "fired" {
-			stats.ActiveAlerts = count
-		} else {
-			stats.ResolvedAlerts += count
-		}
-	}
-	rows.Close()
+	defer rows.Close()
 
-	// By severity (active only)
-	query = `SELECT COUNT(*), severity FROM alerts WHERE status = 'fired' GROUP BY severity`
-	rows, err = s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
 	for rows.Next() {
+		var typ, key string
 		var count int
-		var severity string
-		if err := rows.Scan(&count, &severity); err != nil {
-			rows.Close()
+		if err := rows.Scan(&typ, &key, &count); err != nil {
 			return nil, err
 		}
-		stats.BySeverity[severity] = count
-	}
-	rows.Close()
 
-	// By target (active only)
-	query = `SELECT COUNT(*), target_name FROM alerts WHERE status = 'fired' GROUP BY target_name`
-	rows, err = s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var count int
-		var target string
-		if err := rows.Scan(&count, &target); err != nil {
-			rows.Close()
-			return nil, err
+		switch typ {
+		case "status":
+			stats.TotalAlerts += count
+			if key == "fired" {
+				stats.ActiveAlerts = count
+			} else {
+				stats.ResolvedAlerts += count
+			}
+		case "severity":
+			stats.BySeverity[key] = count
+		case "target":
+			stats.ByTarget[key] = count
+		case "rule":
+			stats.ByRule[key] = count
 		}
-		stats.ByTarget[target] = count
 	}
-	rows.Close()
-
-	// By rule (active only)
-	query = `SELECT COUNT(*), rule_name FROM alerts WHERE status = 'fired' GROUP BY rule_name`
-	rows, err = s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var count int
-		var rule string
-		if err := rows.Scan(&count, &rule); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		stats.ByRule[rule] = count
-	}
-	rows.Close()
 
 	return stats, nil
 }
@@ -861,5 +844,208 @@ func (s *SQLiteStorage) RestoreBackup(srcPath string) error {
 		log.Printf("Warning: could not restore alert_rules: %v", err)
 	}
 
+	// Copy maintenance_windows (if table exists in backup)
+	_, err = s.db.Exec(`
+		INSERT INTO maintenance_windows
+		SELECT * FROM backup.maintenance_windows
+	`)
+	if err != nil {
+		log.Printf("Warning: could not restore maintenance_windows: %v", err)
+	}
+
 	return nil
+}
+
+// MaintenanceWindow-related methods
+
+func (s *SQLiteStorage) migrateMaintenanceWindows() error {
+	query := `
+	CREATE TABLE IF NOT EXISTS maintenance_windows (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT,
+		target_name TEXT,
+		start_time DATETIME NOT NULL,
+		end_time DATETIME NOT NULL,
+		recurring INTEGER NOT NULL DEFAULT 0,
+		days_of_week TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_maintenance_windows_target ON maintenance_windows(target_name);
+	CREATE INDEX IF NOT EXISTS idx_maintenance_windows_time ON maintenance_windows(start_time, end_time);
+	`
+	_, err := s.db.Exec(query)
+	return err
+}
+
+func (s *SQLiteStorage) SaveMaintenanceWindow(window *models.MaintenanceWindow) error {
+	if err := s.migrateMaintenanceWindows(); err != nil {
+		return err
+	}
+
+	query := `
+	INSERT INTO maintenance_windows (name, description, target_name, start_time, end_time, recurring, days_of_week, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	now := time.Now()
+	result, err := s.db.Exec(query,
+		window.Name,
+		window.Description,
+		window.TargetName,
+		window.StartTime,
+		window.EndTime,
+		window.Recurring,
+		window.DaysOfWeek,
+		now,
+		now,
+	)
+	if err != nil {
+		return err
+	}
+
+	id, err := result.LastInsertId()
+	if err == nil {
+		window.ID = id
+		window.CreatedAt = now
+		window.UpdatedAt = now
+	}
+	return nil
+}
+
+func (s *SQLiteStorage) UpdateMaintenanceWindow(window *models.MaintenanceWindow) error {
+	query := `
+	UPDATE maintenance_windows SET
+		name = ?,
+		description = ?,
+		target_name = ?,
+		start_time = ?,
+		end_time = ?,
+		recurring = ?,
+		days_of_week = ?,
+		updated_at = ?
+	WHERE id = ?
+	`
+	now := time.Now()
+	_, err := s.db.Exec(query,
+		window.Name,
+		window.Description,
+		window.TargetName,
+		window.StartTime,
+		window.EndTime,
+		window.Recurring,
+		window.DaysOfWeek,
+		now,
+		window.ID,
+	)
+	if err == nil {
+		window.UpdatedAt = now
+	}
+	return err
+}
+
+func (s *SQLiteStorage) DeleteMaintenanceWindow(id int64) error {
+	query := `DELETE FROM maintenance_windows WHERE id = ?`
+	_, err := s.db.Exec(query, id)
+	return err
+}
+
+func (s *SQLiteStorage) GetMaintenanceWindow(id int64) (*models.MaintenanceWindow, error) {
+	if err := s.migrateMaintenanceWindows(); err != nil {
+		return nil, err
+	}
+
+	query := `
+	SELECT id, name, description, target_name, start_time, end_time, recurring, days_of_week, created_at, updated_at
+	FROM maintenance_windows
+	WHERE id = ?
+	`
+	row := s.db.QueryRow(query, id)
+
+	var w models.MaintenanceWindow
+	var description, targetName, daysOfWeek sql.NullString
+	err := row.Scan(&w.ID, &w.Name, &description, &targetName, &w.StartTime, &w.EndTime, &w.Recurring, &daysOfWeek, &w.CreatedAt, &w.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	w.Description = description.String
+	w.TargetName = targetName.String
+	w.DaysOfWeek = daysOfWeek.String
+
+	return &w, nil
+}
+
+func (s *SQLiteStorage) GetAllMaintenanceWindows() ([]models.MaintenanceWindow, error) {
+	if err := s.migrateMaintenanceWindows(); err != nil {
+		return nil, err
+	}
+
+	query := `
+	SELECT id, name, description, target_name, start_time, end_time, recurring, days_of_week, created_at, updated_at
+	FROM maintenance_windows
+	ORDER BY created_at DESC
+	`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var windows []models.MaintenanceWindow
+	for rows.Next() {
+		var w models.MaintenanceWindow
+		var description, targetName, daysOfWeek sql.NullString
+		if err := rows.Scan(&w.ID, &w.Name, &description, &targetName, &w.StartTime, &w.EndTime, &w.Recurring, &daysOfWeek, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, err
+		}
+		w.Description = description.String
+		w.TargetName = targetName.String
+		w.DaysOfWeek = daysOfWeek.String
+		windows = append(windows, w)
+	}
+
+	return windows, rows.Err()
+}
+
+func (s *SQLiteStorage) GetActiveMaintenanceWindows() ([]models.MaintenanceWindow, error) {
+	if err := s.migrateMaintenanceWindows(); err != nil {
+		return nil, err
+	}
+
+	// Get all windows and filter in Go (more flexible for recurring logic)
+	allWindows, err := s.GetAllMaintenanceWindows()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	var active []models.MaintenanceWindow
+	for _, w := range allWindows {
+		if w.IsActive(now) {
+			active = append(active, w)
+		}
+	}
+
+	return active, nil
+}
+
+// IsInMaintenanceWindow checks if the given target is currently in a maintenance window
+func (s *SQLiteStorage) IsInMaintenanceWindow(targetName string) (bool, error) {
+	activeWindows, err := s.GetActiveMaintenanceWindows()
+	if err != nil {
+		return false, err
+	}
+
+	for _, w := range activeWindows {
+		if w.MatchesTarget(targetName) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

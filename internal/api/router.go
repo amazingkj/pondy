@@ -56,6 +56,24 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 		api.POST("/backup", handler.CreateBackup)
 		api.GET("/backup/download", handler.DownloadBackup)
 		api.POST("/backup/restore", handler.RestoreBackup)
+
+		// Target config CRUD endpoints
+		api.GET("/config/targets", handler.GetConfigTargets)
+		api.POST("/config/targets", handler.AddConfigTarget)
+		api.PUT("/config/targets/:name", handler.UpdateConfigTarget)
+		api.DELETE("/config/targets/:name", handler.DeleteConfigTarget)
+
+		// Alerting config endpoints
+		api.GET("/config/alerting", handler.GetAlertingConfig)
+		api.PUT("/config/alerting", handler.UpdateAlertingConfig)
+
+		// Maintenance Window endpoints
+		api.GET("/maintenance", handler.GetMaintenanceWindows)
+		api.GET("/maintenance/active", handler.GetActiveMaintenanceWindows)
+		api.GET("/maintenance/:id", handler.GetMaintenanceWindow)
+		api.POST("/maintenance", handler.CreateMaintenanceWindow)
+		api.PUT("/maintenance/:id", handler.UpdateMaintenanceWindow)
+		api.DELETE("/maintenance/:id", handler.DeleteMaintenanceWindow)
 	}
 
 	// Health check

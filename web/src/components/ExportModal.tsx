@@ -22,17 +22,20 @@ export function ExportModal({ targetName, instances, onClose }: ExportModalProps
   const { colors } = useTheme();
   const [range, setRange] = useState('24h');
   const [selectedInstance, setSelectedInstance] = useState<string>('');
+  const [exporting, setExporting] = useState<'csv' | 'report' | null>(null);
 
   const hasInstances = instances && instances.length > 1;
 
   const handleExportCSV = () => {
+    setExporting('csv');
     exportCSV(targetName, range, selectedInstance || undefined);
-    onClose();
+    setTimeout(onClose, 300);
   };
 
   const handleOpenReport = () => {
+    setExporting('report');
     openReport(targetName, range);
-    onClose();
+    setTimeout(onClose, 300);
   };
 
   return (
@@ -129,6 +132,7 @@ export function ExportModal({ targetName, instances, onClose }: ExportModalProps
         <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
           <button
             onClick={handleExportCSV}
+            disabled={exporting !== null}
             style={{
               flex: 1,
               padding: '10px 16px',
@@ -136,15 +140,17 @@ export function ExportModal({ targetName, instances, onClose }: ExportModalProps
               borderRadius: '6px',
               backgroundColor: '#22c55e',
               color: '#fff',
-              cursor: 'pointer',
+              cursor: exporting ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               fontWeight: 600,
+              opacity: exporting ? 0.7 : 1,
             }}
           >
-            Export CSV
+            {exporting === 'csv' ? 'Opening...' : 'Export CSV'}
           </button>
           <button
             onClick={handleOpenReport}
+            disabled={exporting !== null}
             style={{
               flex: 1,
               padding: '10px 16px',
@@ -152,12 +158,13 @@ export function ExportModal({ targetName, instances, onClose }: ExportModalProps
               borderRadius: '6px',
               backgroundColor: '#3b82f6',
               color: '#fff',
-              cursor: 'pointer',
+              cursor: exporting ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               fontWeight: 600,
+              opacity: exporting ? 0.7 : 1,
             }}
           >
-            View Report
+            {exporting === 'report' ? 'Opening...' : 'View Report'}
           </button>
         </div>
 

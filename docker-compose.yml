@@ -9,7 +9,8 @@ services:
       - "8080:8080"
     volumes:
       # Mount config directory (not file) for hot-reload support
-      - ./config:/app/config:ro
+      # Note: Must be writable for UI-based config changes (targets, alert rules)
+      - ./config:/app/config
       # Data directory for SQLite database
       - pondy-data:/app/data
     command: ["pondy", "-config", "/app/config/config.yaml"]
@@ -57,7 +58,8 @@ services:
       - "9090:9090"
     volumes:
       # Mount config directory (not file) for hot-reload support
-      - ./config:/app/config:ro
+      # Note: Must be writable for UI-based config changes (targets, alert rules)
+      - ./config:/app/config
       - pondy-data:/app/data
     environment:
       - TZ=Asia/Seoul

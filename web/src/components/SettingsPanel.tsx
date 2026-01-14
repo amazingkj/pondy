@@ -1,6 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { createBackup, downloadBackup, restoreBackup } from '../hooks/useMetrics';
+import { TargetConfigPanel } from './TargetConfigPanel';
+import { useToast } from './Toast';
+import { ConfirmModal } from './ConfirmModal';
+import { LoadingButton } from './LoadingButton';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -8,78 +12,104 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { colors } = useTheme();
-  const [backupStatus, setBackupStatus] = useState<'idle' | 'creating' | 'success' | 'error'>('idle');
-  const [backupMessage, setBackupMessage] = useState('');
-  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
-  const [restoreStatus, setRestoreStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [restoreMessage, setRestoreMessage] = useState('');
+  const toast = useToast();
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showTargetConfig, setShowTargetConfig] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Handle escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showTargetConfig && !showRestoreConfirm) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose, showTargetConfig, showRestoreConfirm]);
+
   const handleCreateBackup = async () => {
-    setBackupStatus('creating');
-    setBackupMessage('');
-
-    const result = await createBackup();
-
-    if (result) {
-      setBackupStatus('success');
-      setBackupMessage(result.message || 'Backup created successfully');
-    } else {
-      setBackupStatus('error');
-      setBackupMessage('Failed to create backup');
+    setBackupLoading(true);
+    try {
+      const result = await createBackup();
+      if (result) {
+        toast.success(result.message || 'Backup created successfully');
+      } else {
+        toast.error('Failed to create backup');
+      }
+    } catch {
+      toast.error('Failed to create backup');
+    } finally {
+      setBackupLoading(false);
     }
   };
 
-  const handleDownloadBackup = () => {
-    setDownloadStatus('downloading');
-    downloadBackup();
-    setDownloadStatus('success');
-    setTimeout(() => setDownloadStatus('idle'), 2000);
+  const handleDownloadBackup = async () => {
+    setDownloadLoading(true);
+    try {
+      downloadBackup();
+      toast.success('Backup download started');
+    } catch {
+      toast.error('Failed to download backup');
+    } finally {
+      setTimeout(() => setDownloadLoading(false), 1000);
+    }
   };
 
-  const handleRestoreBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file extension
     if (!file.name.endsWith('.db')) {
-      setRestoreStatus('error');
-      setRestoreMessage('Please select a .db backup file');
+      toast.error('Please select a .db backup file');
       return;
     }
 
-    setRestoreStatus('uploading');
-    setRestoreMessage('');
+    setPendingFile(file);
+    setShowRestoreConfirm(true);
 
-    const result = await restoreBackup(file);
-
-    if ('error' in result) {
-      setRestoreStatus('error');
-      setRestoreMessage(result.error);
-    } else {
-      setRestoreStatus('success');
-      setRestoreMessage(result.message);
-      // Refresh page after successful restore
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    }
-
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
+  const handleRestoreConfirm = async () => {
+    if (!pendingFile) return;
+
+    setRestoreLoading(true);
+    try {
+      const result = await restoreBackup(pendingFile);
+
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        toast.success(result.message || 'Backup restored successfully');
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } catch {
+      toast.error('Failed to restore backup');
+    } finally {
+      setRestoreLoading(false);
+      setShowRestoreConfirm(false);
+      setPendingFile(null);
+    }
+  };
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
       style={{
         position: 'fixed',
         top: 0,
         right: 0,
         bottom: 0,
-        width: '400px',
-        maxWidth: '100vw',
+        width: 'min(400px, 100vw)',
         backgroundColor: colors.bgCard,
         borderLeft: `1px solid ${colors.border}`,
         zIndex: 1000,
@@ -98,11 +128,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           alignItems: 'center',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: colors.text }}>
+        <h2 id="settings-title" style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: colors.text }}>
           Settings
         </h2>
         <button
           onClick={onClose}
+          aria-label="Close settings panel"
           style={{
             background: 'none',
             border: 'none',
@@ -118,6 +149,64 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+        {/* Target Configuration Section */}
+        <section style={{ marginBottom: '24px' }}>
+          <h3 style={{
+            fontSize: '14px',
+            fontWeight: 600,
+            color: colors.text,
+            marginBottom: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
+            </svg>
+            Target Configuration
+          </h3>
+
+          <div style={{
+            padding: '16px',
+            backgroundColor: colors.bgSecondary,
+            borderRadius: '8px',
+            border: `1px solid ${colors.border}`,
+          }}>
+            <p style={{
+              fontSize: '13px',
+              color: colors.textSecondary,
+              margin: '0 0 16px 0',
+              lineHeight: 1.5,
+            }}>
+              Add, edit, or remove monitoring targets. Changes are saved directly to your config file.
+            </p>
+
+            <button
+              onClick={() => setShowTargetConfig(true)}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              Manage Targets
+            </button>
+          </div>
+        </section>
+
         {/* Backup Section */}
         <section style={{ marginBottom: '24px' }}>
           <h3 style={{
@@ -154,91 +243,39 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </p>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
+              <LoadingButton
                 onClick={handleCreateBackup}
-                disabled={backupStatus === 'creating'}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#3b82f6',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: backupStatus === 'creating' ? 'wait' : 'pointer',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  opacity: backupStatus === 'creating' ? 0.7 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
+                isLoading={backupLoading}
+                loadingText="Creating..."
+                icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                    <polyline points="17 21 17 13 7 13 7 21" />
+                    <polyline points="7 3 7 8 15 8" />
+                  </svg>
+                }
+                size="sm"
               >
-                {backupStatus === 'creating' ? (
-                  <>
-                    <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                      <polyline points="17 21 17 13 7 13 7 21" />
-                      <polyline points="7 3 7 8 15 8" />
-                    </svg>
-                    Create Backup
-                  </>
-                )}
-              </button>
+                Create Backup
+              </LoadingButton>
 
-              <button
+              <LoadingButton
                 onClick={handleDownloadBackup}
-                disabled={downloadStatus === 'downloading'}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: colors.bgCard,
-                  color: colors.text,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: '6px',
-                  cursor: downloadStatus === 'downloading' ? 'wait' : 'pointer',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  opacity: downloadStatus === 'downloading' ? 0.7 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
+                isLoading={downloadLoading}
+                loadingText="Downloading..."
+                variant="secondary"
+                icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                }
+                size="sm"
               >
-                {downloadStatus === 'downloading' ? (
-                  'Downloading...'
-                ) : downloadStatus === 'success' ? (
-                  <>
-                    <span style={{ color: '#22c55e' }}>✓</span>
-                    Downloaded
-                  </>
-                ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Download Latest
-                  </>
-                )}
-              </button>
+                Download Latest
+              </LoadingButton>
             </div>
-
-            {backupStatus !== 'idle' && backupMessage && (
-              <div style={{
-                marginTop: '12px',
-                padding: '8px 12px',
-                backgroundColor: backupStatus === 'success' ? '#dcfce7' : '#fee2e2',
-                color: backupStatus === 'success' ? '#166534' : '#991b1b',
-                borderRadius: '4px',
-                fontSize: '12px',
-              }}>
-                {backupMessage}
-              </div>
-            )}
           </div>
         </section>
 
@@ -297,63 +334,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               ref={fileInputRef}
               type="file"
               accept=".db"
-              onChange={handleRestoreBackup}
+              onChange={handleFileSelect}
               style={{ display: 'none' }}
               id="restore-file-input"
+              aria-label="Select backup file"
             />
 
-            <button
+            <LoadingButton
               onClick={() => fileInputRef.current?.click()}
-              disabled={restoreStatus === 'uploading'}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: colors.bgCard,
-                color: colors.text,
-                border: `1px solid ${colors.border}`,
-                borderRadius: '6px',
-                cursor: restoreStatus === 'uploading' ? 'wait' : 'pointer',
-                fontSize: '13px',
-                fontWeight: 500,
-                opacity: restoreStatus === 'uploading' ? 0.7 : 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
+              isLoading={restoreLoading}
+              loadingText="Restoring..."
+              variant="secondary"
+              icon={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              }
+              size="sm"
             >
-              {restoreStatus === 'uploading' ? (
-                <>
-                  <span style={{ animation: 'spin 1s linear infinite' }}>&#8987;</span>
-                  Restoring...
-                </>
-              ) : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  Upload Backup File
-                </>
-              )}
-            </button>
-
-            {restoreStatus !== 'idle' && restoreMessage && (
-              <div style={{
-                marginTop: '12px',
-                padding: '8px 12px',
-                backgroundColor: restoreStatus === 'success' ? '#dcfce7' : '#fee2e2',
-                color: restoreStatus === 'success' ? '#166534' : '#991b1b',
-                borderRadius: '4px',
-                fontSize: '12px',
-              }}>
-                {restoreMessage}
-                {restoreStatus === 'success' && (
-                  <span style={{ marginLeft: '8px', opacity: 0.7 }}>
-                    (Refreshing page...)
-                  </span>
-                )}
-              </div>
-            )}
+              Upload Backup File
+            </LoadingButton>
           </div>
         </section>
 
@@ -399,6 +401,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           </div>
         </section>
       </div>
+
+      {/* Target Configuration Panel */}
+      <TargetConfigPanel
+        isOpen={showTargetConfig}
+        onClose={() => setShowTargetConfig(false)}
+      />
+
+      {/* Restore Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showRestoreConfirm}
+        title="Restore Backup"
+        message={`This will replace all current data with the backup file "${pendingFile?.name}". This action cannot be undone.`}
+        confirmLabel="Restore"
+        cancelLabel="Cancel"
+        variant="warning"
+        isLoading={restoreLoading}
+        onConfirm={handleRestoreConfirm}
+        onCancel={() => {
+          setShowRestoreConfirm(false);
+          setPendingFile(null);
+        }}
+      />
     </div>
   );
 }

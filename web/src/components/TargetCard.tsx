@@ -323,32 +323,26 @@ export const TargetCard = memo(function TargetCard({ target, globalView, renderI
               </div>
             )}
 
-            {/* Non-Heap - show with visual bar */}
+            {/* Non-Heap - show with visual bar like Heap */}
             {current.non_heap_used > 0 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
                   <span style={{ color: themeColors.textSecondary }}>Non-Heap</span>
-                  <span style={{
-                    color: current.non_heap_used > 500 * 1024 * 1024 ? '#f59e0b' : '#8b5cf6',
-                    fontWeight: 600,
-                    transition: 'color 0.3s',
-                  }}>
-                    {formatBytes(current.non_heap_used)}
+                  <span style={{ color: themeColors.text }}>
+                    {formatBytes(current.non_heap_used)}{current.non_heap_max > 0 ? ` / ${formatBytes(current.non_heap_max)}` : ''}
                   </span>
                 </div>
-                <div style={{
-                  height: '6px',
-                  backgroundColor: themeColors.border,
-                  borderRadius: '3px',
-                  overflow: 'hidden',
-                  position: 'relative',
-                }}>
+                <div style={{ height: '6px', backgroundColor: themeColors.border, borderRadius: '3px', overflow: 'hidden' }}>
                   <div
                     style={{
-                      width: `${Math.min((current.non_heap_used / (700 * 1024 * 1024)) * 100, 100)}%`,
+                      width: current.non_heap_max > 0
+                        ? `${Math.min((current.non_heap_used / current.non_heap_max) * 100, 100)}%`
+                        : `${Math.min((current.non_heap_used / (700 * 1024 * 1024)) * 100, 100)}%`,
                       height: '100%',
-                      backgroundColor: current.non_heap_used > 500 * 1024 * 1024 ? '#f59e0b' : '#8b5cf6',
-                      transition: 'width 0.5s ease-out, background-color 0.3s',
+                      backgroundColor: current.non_heap_max > 0
+                        ? getMemoryColor(current.non_heap_used / current.non_heap_max)
+                        : '#8b5cf6',
+                      transition: 'width 0.3s',
                     }}
                   />
                 </div>
