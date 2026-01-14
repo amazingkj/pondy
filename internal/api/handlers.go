@@ -691,6 +691,9 @@ func (h *Handler) GetAlerts(c *gin.Context) {
 	if err != nil || limit <= 0 {
 		limit = 100
 	}
+	if limit > 10000 {
+		limit = 10000
+	}
 
 	alerts, err := h.store.GetAlerts(status, limit)
 	if err != nil {
@@ -784,6 +787,14 @@ func (h *Handler) TestAlert(c *gin.Context) {
 		opts = alerter.TestAlertOptions{}
 	}
 
+	// Validate severity - reset to default if invalid
+	if opts.Severity != "" &&
+		opts.Severity != models.SeverityInfo &&
+		opts.Severity != models.SeverityWarning &&
+		opts.Severity != models.SeverityCritical {
+		opts.Severity = models.SeverityWarning
+	}
+
 	if err := h.alertMgr.TestAlertWithOptions(opts); err != nil {
 		RespondInternalError(c, err)
 		return
@@ -853,6 +864,16 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 		return
 	}
 
+	// Validate field lengths
+	if len(input.Name) > 255 {
+		RespondBadRequest(c, "rule name must be less than 255 characters")
+		return
+	}
+	if len(input.Message) > 5000 {
+		RespondBadRequest(c, "message must be less than 5000 characters")
+		return
+	}
+
 	// Validate severity
 	if input.Severity != models.SeverityInfo &&
 		input.Severity != models.SeverityWarning &&
@@ -914,6 +935,16 @@ func (h *Handler) UpdateAlertRule(c *gin.Context) {
 	var input models.AlertRuleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		RespondBadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	// Validate field lengths
+	if len(input.Name) > 255 {
+		RespondBadRequest(c, "rule name must be less than 255 characters")
+		return
+	}
+	if len(input.Message) > 5000 {
+		RespondBadRequest(c, "message must be less than 5000 characters")
 		return
 	}
 

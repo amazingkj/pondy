@@ -122,6 +122,7 @@ func (m *Manager) Check(metrics *models.PoolMetrics) {
 	}
 	if inMaintenance {
 		// Skip alert processing during maintenance
+		log.Printf("Alerter: skipping alert check for %s (in maintenance window)", metrics.TargetName)
 		return
 	}
 
@@ -222,7 +223,9 @@ func (m *Manager) fireAlert(rule *config.AlertRule, ctx *RuleContext, now time.T
 	notifiedAt := time.Now()
 	alert.NotifiedAt = &notifiedAt
 	alert.Channels = m.getEnabledChannelNames()
-	m.store.UpdateAlert(alert)
+	if err := m.store.UpdateAlert(alert); err != nil {
+		log.Printf("Alerter: failed to update alert after notification: %v", err)
+	}
 
 	log.Printf("Alerter: fired alert %s for %s/%s: %s",
 		rule.Name, ctx.TargetName, ctx.InstanceName, message)

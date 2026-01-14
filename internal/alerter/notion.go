@@ -4,12 +4,26 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/jiin/pondy/internal/config"
 	"github.com/jiin/pondy/internal/models"
 )
+
+// Notion database ID regex patterns
+var (
+	notionDBIDRegex     = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
+	notionDBIDUUIDRegex = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+)
+
+// isValidNotionDatabaseID checks if the ID matches Notion database ID format
+func isValidNotionDatabaseID(id string) bool {
+	return notionDBIDRegex.MatchString(id) || notionDBIDUUIDRegex.MatchString(id)
+}
 
 // NotionChannel sends alerts to Notion database
 type NotionChannel struct {
@@ -32,7 +46,14 @@ func (n *NotionChannel) Name() string {
 }
 
 func (n *NotionChannel) IsEnabled() bool {
-	return n.cfg.Enabled && n.cfg.Token != "" && n.cfg.DatabaseID != ""
+	if !n.cfg.Enabled || n.cfg.Token == "" || n.cfg.DatabaseID == "" {
+		return false
+	}
+	// Warn if database ID format looks invalid
+	if !isValidNotionDatabaseID(n.cfg.DatabaseID) {
+		log.Printf("Notion: warning - database ID '%s' may have invalid format", n.cfg.DatabaseID)
+	}
+	return true
 }
 
 func (n *NotionChannel) Send(alert *models.Alert) error {
@@ -192,6 +213,9 @@ func (n *NotionChannel) createPage(page NotionPage) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	// Drain body for connection reuse
+	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("notion API returned status %d", resp.StatusCode)
