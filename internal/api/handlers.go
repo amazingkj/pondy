@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/csv"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -1123,13 +1124,17 @@ func (h *Handler) RestoreBackup(c *gin.Context) {
 
 	// Restore from the uploaded file
 	if err := h.store.RestoreBackup(tempPath); err != nil {
-		os.Remove(tempPath) // Clean up temp file
+		if removeErr := os.Remove(tempPath); removeErr != nil {
+			log.Printf("Warning: failed to remove temp backup file %s: %v", tempPath, removeErr)
+		}
 		RespondError(c, http.StatusBadRequest, "invalid backup file: "+err.Error())
 		return
 	}
 
 	// Clean up temp file
-	os.Remove(tempPath)
+	if err := os.Remove(tempPath); err != nil {
+		log.Printf("Warning: failed to remove temp backup file %s: %v", tempPath, err)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "backup restored successfully",

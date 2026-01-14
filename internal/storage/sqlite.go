@@ -6,11 +6,50 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jiin/pondy/internal/models"
 	_ "modernc.org/sqlite"
 )
+
+// sanitizeSQLitePath validates and sanitizes a file path for use in SQLite commands
+// Returns error if path contains potentially dangerous characters
+func sanitizeSQLitePath(path string) (string, error) {
+	// Clean the path
+	cleaned := filepath.Clean(path)
+
+	// Check for SQL injection characters
+	// SQLite uses single quotes for string literals
+	if strings.Contains(cleaned, "'") {
+		return "", fmt.Errorf("path contains invalid character: single quote")
+	}
+
+	// Check for semicolons which could terminate statements
+	if strings.Contains(cleaned, ";") {
+		return "", fmt.Errorf("path contains invalid character: semicolon")
+	}
+
+	// Check for double dashes (SQL comments)
+	if strings.Contains(cleaned, "--") {
+		return "", fmt.Errorf("path contains invalid sequence: double dash")
+	}
+
+	// Check for null bytes
+	if strings.Contains(cleaned, "\x00") {
+		return "", fmt.Errorf("path contains invalid character: null byte")
+	}
+
+	// Validate path characters - allow only safe characters
+	// Allow alphanumeric, underscore, hyphen, dot, forward/back slash, colon (for Windows drives)
+	validPath := regexp.MustCompile(`^[a-zA-Z0-9_\-./\\:]+$`)
+	if !validPath.MatchString(cleaned) {
+		return "", fmt.Errorf("path contains invalid characters")
+	}
+
+	return cleaned, nil
+}
 
 type SQLiteStorage struct {
 	db *sql.DB
@@ -772,38 +811,81 @@ func (s *SQLiteStorage) GetAlertRuleByName(name string) (*models.AlertRule, erro
 
 // CreateBackup creates a backup of the database
 func (s *SQLiteStorage) CreateBackup(destPath string) error {
+	// Sanitize path to prevent SQL injection
+	safePath, err := sanitizeSQLitePath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid backup path: %w", err)
+	}
+
 	// Ensure directory exists
-	dir := filepath.Dir(destPath)
+	dir := filepath.Dir(safePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
 	// Use SQLite VACUUM INTO for online backup
-	query := fmt.Sprintf(`VACUUM INTO '%s'`, destPath)
-	_, err := s.db.Exec(query)
+	query := fmt.Sprintf(`VACUUM INTO '%s'`, safePath)
+	_, err = s.db.Exec(query)
 	return err
 }
 
 // RestoreBackup restores the database from a backup file
 func (s *SQLiteStorage) RestoreBackup(srcPath string) error {
+	// Sanitize path to prevent SQL injection
+	safePath, err := sanitizeSQLitePath(srcPath)
+	if err != nil {
+		return fmt.Errorf("invalid backup path: %w", err)
+	}
+
+	// Check SQLite file magic number before opening
+	file, err := os.Open(safePath)
+	if err != nil {
+		return fmt.Errorf("cannot open backup file: %w", err)
+	}
+	magic := make([]byte, 16)
+	n, err := file.Read(magic)
+	file.Close()
+	if err != nil || n < 16 {
+		return fmt.Errorf("cannot read backup file header")
+	}
+	// SQLite database file header: "SQLite format 3\x00"
+	if string(magic) != "SQLite format 3\x00" {
+		return fmt.Errorf("backup file is not a valid SQLite database")
+	}
+
 	// Validate the backup file is a valid SQLite database
-	srcDB, err := sql.Open("sqlite", srcPath)
+	srcDB, err := sql.Open("sqlite", safePath)
 	if err != nil {
 		return fmt.Errorf("invalid backup file: %w", err)
+	}
+
+	// Run integrity check
+	var integrityResult string
+	err = srcDB.QueryRow("PRAGMA integrity_check").Scan(&integrityResult)
+	if err != nil {
+		srcDB.Close()
+		return fmt.Errorf("backup file integrity check failed: %w", err)
+	}
+	if integrityResult != "ok" {
+		srcDB.Close()
+		return fmt.Errorf("backup file is corrupted: %s", integrityResult)
 	}
 
 	// Check if it's a valid SQLite database with expected tables
 	var tableName string
 	err = srcDB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='pool_metrics' LIMIT 1").Scan(&tableName)
-	srcDB.Close()
+	if err := srcDB.Close(); err != nil {
+		log.Printf("Warning: failed to close backup database: %v", err)
+	}
 	if err != nil {
 		return fmt.Errorf("backup file does not contain pondy data: %w", err)
 	}
 
 	// Delete existing data and import from backup
+	// Table names are hardcoded whitelist - safe from SQL injection
 	tables := []string{"pool_metrics", "alerts", "alert_rules"}
 	for _, table := range tables {
-		// Clear existing data
+		// Clear existing data using parameterized approach (table names whitelisted)
 		_, err := s.db.Exec(fmt.Sprintf("DELETE FROM %s", table))
 		if err != nil {
 			log.Printf("Warning: could not clear table %s: %v", table, err)
@@ -811,7 +893,7 @@ func (s *SQLiteStorage) RestoreBackup(srcPath string) error {
 	}
 
 	// Attach backup database and copy data
-	_, err = s.db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS backup", srcPath))
+	_, err = s.db.Exec(fmt.Sprintf("ATTACH DATABASE '%s' AS backup", safePath))
 	if err != nil {
 		return fmt.Errorf("failed to attach backup: %w", err)
 	}
@@ -1017,21 +1099,43 @@ func (s *SQLiteStorage) GetActiveMaintenanceWindows() ([]models.MaintenanceWindo
 		return nil, err
 	}
 
-	// Get all windows and filter in Go (more flexible for recurring logic)
-	allWindows, err := s.GetAllMaintenanceWindows()
-	if err != nil {
-		return nil, err
-	}
-
 	now := time.Now()
+	nowStr := now.Format(time.RFC3339)
+
+	// First, filter non-recurring windows at SQL level for efficiency
+	// Then load recurring windows and filter in Go
+	query := `
+		SELECT id, name, description, target_name, start_time, end_time, recurring, days_of_week, created_at, updated_at
+		FROM maintenance_windows
+		WHERE (recurring = 0 AND start_time <= ? AND end_time >= ?)
+		   OR recurring = 1
+		ORDER BY start_time ASC
+	`
+
+	rows, err := s.db.Query(query, nowStr, nowStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query maintenance windows: %w", err)
+	}
+	defer rows.Close()
+
 	var active []models.MaintenanceWindow
-	for _, w := range allWindows {
-		if w.IsActive(now) {
+	for rows.Next() {
+		var w models.MaintenanceWindow
+		var desc, targetName, daysOfWeek sql.NullString
+		if err := rows.Scan(&w.ID, &w.Name, &desc, &targetName, &w.StartTime, &w.EndTime, &w.Recurring, &daysOfWeek, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan maintenance window: %w", err)
+		}
+		w.Description = desc.String
+		w.TargetName = targetName.String
+		w.DaysOfWeek = daysOfWeek.String
+
+		// For non-recurring, already filtered by SQL; for recurring, filter in Go
+		if !w.Recurring || w.IsActive(now) {
 			active = append(active, w)
 		}
 	}
 
-	return active, nil
+	return active, rows.Err()
 }
 
 // IsInMaintenanceWindow checks if the given target is currently in a maintenance window

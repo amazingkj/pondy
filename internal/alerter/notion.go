@@ -215,7 +215,9 @@ func (n *NotionChannel) createPage(page NotionPage) error {
 	defer resp.Body.Close()
 
 	// Drain body for connection reuse
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		log.Printf("Notion: warning - failed to drain response body: %v", err)
+	}
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("notion API returned status %d", resp.StatusCode)

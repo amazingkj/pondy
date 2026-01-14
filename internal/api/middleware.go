@@ -16,6 +16,7 @@ type RateLimiter struct {
 	interval time.Duration // time interval
 	burst    int           // max burst size
 	cleanup  time.Duration // cleanup interval for expired entries
+	stopCh   chan struct{} // channel to signal shutdown
 }
 
 type clientBucket struct {
@@ -34,6 +35,7 @@ func NewRateLimiter(rate int, interval time.Duration, burst int) *RateLimiter {
 		interval: interval,
 		burst:    burst,
 		cleanup:  5 * time.Minute,
+		stopCh:   make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -42,20 +44,30 @@ func NewRateLimiter(rate int, interval time.Duration, burst int) *RateLimiter {
 	return rl
 }
 
+// Stop stops the rate limiter cleanup goroutine
+func (rl *RateLimiter) Stop() {
+	close(rl.stopCh)
+}
+
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, bucket := range rl.clients {
-			// Remove clients that haven't been seen for 10 minutes
-			if now.Sub(bucket.lastRefill) > 10*time.Minute {
-				delete(rl.clients, ip)
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, bucket := range rl.clients {
+				// Remove clients that haven't been seen for 10 minutes
+				if now.Sub(bucket.lastRefill) > 10*time.Minute {
+					delete(rl.clients, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 

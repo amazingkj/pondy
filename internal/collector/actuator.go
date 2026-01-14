@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -86,7 +87,9 @@ func (c *ActuatorCollector) InstanceName() string {
 }
 
 // Collect collects metrics without context (legacy, uses background context)
+// Deprecated: Use CollectWithContext instead for proper timeout/cancellation support
 func (c *ActuatorCollector) Collect() (*models.PoolMetrics, error) {
+	log.Printf("Warning: Collect() called without context, use CollectWithContext() for timeout support")
 	return c.CollectWithContext(context.Background())
 }
 

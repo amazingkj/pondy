@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"time"
@@ -82,15 +83,18 @@ func GetColorInt(severity string) int {
 	}
 }
 
-// GetSlackColor returns Slack-specific color names
+// GetSlackColor returns Slack-specific color names or hex colors
+// Slack accepts: "good", "warning", "danger", or hex like "#3498DB"
 func GetSlackColor(severity string) string {
 	switch severity {
 	case models.SeverityCritical:
 		return "danger"
 	case models.SeverityWarning:
 		return "warning"
+	case models.SeverityInfo:
+		return "good"
 	default:
-		return ColorInfo
+		return ColorInfo // hex color fallback
 	}
 }
 
@@ -115,7 +119,9 @@ func PostJSON(client *http.Client, url string, payload interface{}) error {
 	defer resp.Body.Close()
 
 	// Drain body for connection reuse
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		log.Printf("Warning: failed to drain response body: %v", err)
+	}
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
