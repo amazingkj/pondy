@@ -29,6 +29,8 @@ func NewRouter(cfgMgr *config.Manager, store storage.Storage, alertMgr *alerter.
 	connLimiter := NewConnectionLimiter(50, 500)
 
 	// Global middlewares
+	r.Use(SecurityHeadersMiddleware())
+	r.Use(CORSMiddleware([]string{"*"})) // Allow all origins; configure for production
 	r.Use(ConnectionLimitMiddleware(connLimiter))
 	r.Use(MaxBodySizeMiddleware(10 * 1024 * 1024)) // 10MB max body size
 

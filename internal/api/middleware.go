@@ -231,3 +231,70 @@ func ConnectionLimitMiddleware(cl *ConnectionLimiter) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// SecurityHeadersMiddleware adds security headers to all responses
+func SecurityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Prevent clickjacking
+		c.Header("X-Frame-Options", "SAMEORIGIN")
+
+		// Prevent MIME type sniffing
+		c.Header("X-Content-Type-Options", "nosniff")
+
+		// XSS Protection (legacy browsers)
+		c.Header("X-XSS-Protection", "1; mode=block")
+
+		// Referrer Policy
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+
+		// Permissions Policy (disable unnecessary features)
+		c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+
+		// Content Security Policy for API responses
+		// Note: Frontend serves its own CSP via meta tag or separate config
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		}
+
+		c.Next()
+	}
+}
+
+// CORSMiddleware handles Cross-Origin Resource Sharing
+// allowedOrigins: list of allowed origins, or ["*"] for all (not recommended for production)
+func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allowAll := len(allowedOrigins) == 1 && allowedOrigins[0] == "*"
+
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		if allowAll {
+			allowed = true
+		} else {
+			for _, o := range allowedOrigins {
+				if o == origin {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if allowed && origin != "" {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+			c.Header("Access-Control-Max-Age", "86400")
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
+
+		// Handle preflight requests
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}

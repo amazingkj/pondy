@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -131,10 +132,18 @@ func (w *WebhookChannel) sendPayload(event string, alert *models.Alert) error {
 			}
 			continue
 		}
-		defer resp.Body.Close()
+
+		// Helper to drain and close response body for connection reuse
+		drainAndClose := func() {
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				log.Printf("Warning: failed to drain response body: %v", err)
+			}
+			resp.Body.Close()
+		}
 
 		if resp.StatusCode >= 500 {
-			// Server error - retry
+			// Server error - drain body before retry
+			drainAndClose()
 			lastErr = fmt.Errorf("webhook returned status %d", resp.StatusCode)
 			if attempt < webhookMaxRetries {
 				log.Printf("Webhook: attempt %d/%d failed with status %d, retrying in %v", attempt, webhookMaxRetries, resp.StatusCode, delay)
@@ -146,10 +155,12 @@ func (w *WebhookChannel) sendPayload(event string, alert *models.Alert) error {
 
 		if resp.StatusCode >= 400 {
 			// Client error - don't retry
+			drainAndClose()
 			return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 		}
 
-		// Success
+		// Success - drain body for connection reuse
+		drainAndClose()
 		return nil
 	}
 

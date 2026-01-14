@@ -32,6 +32,10 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
+# Create non-root user for security
+RUN addgroup -g 1000 pondy && \
+    adduser -u 1000 -G pondy -s /bin/sh -D pondy
+
 # Copy both binaries
 COPY --from=builder /app/pondy .
 COPY --from=builder /app/pondy-mock .
@@ -40,7 +44,17 @@ COPY --from=builder /app/pondy-mock .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
+# Create data directory and set ownership
+RUN mkdir -p /app/data && chown -R pondy:pondy /app
+
+# Switch to non-root user
+USER pondy
+
 EXPOSE 8080 9090
+
+# Healthcheck for container orchestration
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["pondy"]
