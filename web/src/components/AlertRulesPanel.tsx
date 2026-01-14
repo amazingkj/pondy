@@ -355,6 +355,24 @@ function RuleCard({
   );
 }
 
+const operators = [
+  { value: '>', label: '> (greater than)' },
+  { value: '<', label: '< (less than)' },
+  { value: '>=', label: '>= (greater or equal)' },
+  { value: '<=', label: '<= (less or equal)' },
+  { value: '==', label: '== (equals)' },
+  { value: '!=', label: '!= (not equals)' },
+];
+
+// Parse condition string into parts
+const parseCondition = (condition: string): { variable: string; operator: string; value: string } => {
+  const match = condition.match(/^(\w+)\s*(>|<|>=|<=|==|!=)\s*(\d+(?:\.\d+)?)$/);
+  if (match) {
+    return { variable: match[1], operator: match[2], value: match[3] };
+  }
+  return { variable: 'usage', operator: '>', value: '80' };
+};
+
 function RuleForm({
   rule,
   onSubmit,
@@ -366,12 +384,21 @@ function RuleForm({
 }) {
   const { colors } = useTheme();
   const [name, setName] = useState(rule?.name || '');
-  const [condition, setCondition] = useState(rule?.condition || '');
+
+  // Parse existing condition or use defaults
+  const initialCondition = rule?.condition ? parseCondition(rule.condition) : { variable: 'usage', operator: '>', value: '80' };
+  const [condVariable, setCondVariable] = useState(initialCondition.variable);
+  const [condOperator, setCondOperator] = useState(initialCondition.operator);
+  const [condValue, setCondValue] = useState(initialCondition.value);
+
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>(rule?.severity || 'warning');
   const [message, setMessage] = useState(rule?.message || '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // Build condition string from parts
+  const condition = `${condVariable} ${condOperator} ${condValue}`;
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -382,10 +409,10 @@ function RuleForm({
       newErrors.name = 'Name must be at least 2 characters';
     }
 
-    if (!condition.trim()) {
-      newErrors.condition = 'Condition is required';
-    } else if (!/^\w+\s*(>|<|>=|<=|==|!=)\s*\d+$/.test(condition.trim())) {
-      newErrors.condition = 'Invalid format. Use: variable operator value (e.g., usage > 80)';
+    if (!condValue.trim() || isNaN(Number(condValue))) {
+      newErrors.condition = 'Please enter a valid number';
+    } else if (Number(condValue) < 0) {
+      newErrors.condition = 'Value must be 0 or greater';
     }
 
     setErrors(newErrors);
@@ -461,29 +488,81 @@ function RuleForm({
         </div>
 
         <div>
-          <label style={labelStyle} htmlFor="rule-condition">Condition *</label>
-          <input
-            id="rule-condition"
-            type="text"
-            value={condition}
-            onChange={(e) => { setCondition(e.target.value); setErrors(prev => ({ ...prev, condition: '' })); }}
-            placeholder='e.g., usage > 80, pending > 5, idle == 0'
-            aria-invalid={!!errors.condition}
-            aria-describedby={errors.condition ? 'condition-error' : 'condition-hint'}
-            style={{
-              ...inputStyle,
-              borderColor: errors.condition ? '#ef4444' : colors.border,
-            }}
-          />
-          {errors.condition ? (
-            <div id="condition-error" style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px' }}>
+          <label style={labelStyle}>Condition *</label>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {/* Variable Select */}
+            <select
+              value={condVariable}
+              onChange={(e) => { setCondVariable(e.target.value); setErrors(prev => ({ ...prev, condition: '' })); }}
+              aria-label="Select metric variable"
+              style={{ ...inputStyle, flex: 2, cursor: 'pointer' }}
+            >
+              {conditionVariables.map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Operator Select */}
+            <select
+              value={condOperator}
+              onChange={(e) => setCondOperator(e.target.value)}
+              aria-label="Select comparison operator"
+              style={{ ...inputStyle, flex: 1, cursor: 'pointer', minWidth: '80px' }}
+            >
+              {operators.map((op) => (
+                <option key={op.value} value={op.value}>
+                  {op.value}
+                </option>
+              ))}
+            </select>
+
+            {/* Value Input */}
+            <input
+              type="number"
+              value={condValue}
+              onChange={(e) => { setCondValue(e.target.value); setErrors(prev => ({ ...prev, condition: '' })); }}
+              placeholder="80"
+              min="0"
+              step="any"
+              aria-label="Threshold value"
+              aria-invalid={!!errors.condition}
+              style={{
+                ...inputStyle,
+                flex: 1,
+                minWidth: '80px',
+                borderColor: errors.condition ? '#ef4444' : colors.border,
+              }}
+            />
+          </div>
+
+          {/* Variable description */}
+          <div style={{ fontSize: '11px', color: colors.textSecondary, marginTop: '6px' }}>
+            {conditionVariables.find(v => v.name === condVariable)?.desc || ''}
+          </div>
+
+          {errors.condition && (
+            <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px' }}>
               {errors.condition}
             </div>
-          ) : (
-            <div id="condition-hint" style={{ fontSize: '11px', color: colors.textSecondary, marginTop: '4px' }}>
-              Format: variable operator value (e.g., usage {'>'} 80)
-            </div>
           )}
+
+          {/* Preview */}
+          <div style={{
+            marginTop: '8px',
+            padding: '8px 12px',
+            backgroundColor: colors.bgCard,
+            borderRadius: '4px',
+            border: `1px solid ${colors.border}`,
+            fontSize: '12px',
+            fontFamily: 'monospace',
+          }}>
+            <span style={{ color: colors.textSecondary }}>Condition: </span>
+            <span style={{ color: '#8b5cf6' }}>{condVariable}</span>
+            <span style={{ color: colors.text }}> {condOperator} </span>
+            <span style={{ color: '#f59e0b' }}>{condValue || '?'}</span>
+          </div>
         </div>
 
         <div>
