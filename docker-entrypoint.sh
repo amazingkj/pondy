@@ -1,6 +1,16 @@
 #!/bin/sh
 set -e
 
+# Fix permissions for mounted volumes if running as root
+if [ "$(id -u)" = "0" ]; then
+  # Fix ownership of data and config directories
+  chown -R pondy:pondy /app/data 2>/dev/null || true
+  chown -R pondy:pondy /app/config 2>/dev/null || true
+
+  # Re-exec as pondy user
+  exec su-exec pondy "$0" "$@"
+fi
+
 case "$1" in
   pondy)
     shift

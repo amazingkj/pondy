@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o pondy-mock ./cmd/mock
 
 FROM alpine:3.19
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates su-exec
 
 WORKDIR /app
 
@@ -44,11 +44,8 @@ COPY --from=builder /app/pondy-mock .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
-# Create data directory and set ownership
+# Create data directory
 RUN mkdir -p /app/data && chown -R pondy:pondy /app
-
-# Switch to non-root user
-USER pondy
 
 EXPOSE 8080 9090
 
