@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useTargets, useActiveAlerts } from '../hooks/useMetrics';
 import { TargetCard } from './TargetCard';
 import { Overview } from './Overview';
@@ -17,7 +17,7 @@ const STORAGE_KEYS = {
   SELECTED_GROUP: 'pondy-selected-group',
 };
 
-export function Dashboard() {
+export const Dashboard = memo(function Dashboard() {
   const { data, loading, error } = useTargets(5000);
   const { data: activeAlerts } = useActiveAlerts();
   const [globalView, setGlobalView] = useState<GlobalView>(null);
@@ -144,9 +144,11 @@ export function Dashboard() {
               </p>
             </div>
             {groups.length > 0 && (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }} role="group" aria-label="Filter by group">
                 <button
                   onClick={() => setSelectedGroup(null)}
+                  aria-pressed={selectedGroup === null}
+                  aria-label="Show all groups"
                   style={{
                     padding: '6px 12px',
                     border: `1px solid ${selectedGroup === null ? colors.accent : colors.border}`,
@@ -165,6 +167,8 @@ export function Dashboard() {
                   <button
                     key={group}
                     onClick={() => setSelectedGroup(group)}
+                    aria-pressed={selectedGroup === group}
+                    aria-label={`Filter by ${group} group`}
                     style={{
                       padding: '6px 12px',
                       border: `1px solid ${selectedGroup === group ? colors.accent : colors.border}`,
@@ -184,9 +188,12 @@ export function Dashboard() {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px' }} role="toolbar" aria-label="Dashboard actions">
             <button
               onClick={() => setShowAlerts(prev => !prev)}
+              aria-label={`${showAlerts ? 'Close' : 'Open'} alerts panel`}
+              aria-expanded={showAlerts}
+              aria-controls="alerts-panel"
               style={{
                 padding: '8px 12px',
                 border: `1px solid ${showAlerts ? '#3b82f6' : colors.border}`,
@@ -231,6 +238,9 @@ export function Dashboard() {
             </button>
             <button
               onClick={() => setShowSettings(prev => !prev)}
+              aria-label={`${showSettings ? 'Close' : 'Open'} settings panel`}
+              aria-expanded={showSettings}
+              aria-controls="settings-panel"
               style={{
                 padding: '8px 12px',
                 border: `1px solid ${showSettings ? '#3b82f6' : colors.border}`,
@@ -244,13 +254,14 @@ export function Dashboard() {
                 fontSize: '13px',
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
             </button>
             <button
               onClick={toggleTheme}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
               style={{
                 padding: '8px 12px',
                 border: `1px solid ${colors.border}`,
@@ -434,4 +445,4 @@ export function Dashboard() {
       )}
     </div>
   );
-}
+});

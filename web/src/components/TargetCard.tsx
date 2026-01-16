@@ -5,6 +5,7 @@ import { PoolGauge } from './PoolGauge';
 import type { GlobalView } from './Dashboard';
 import { useTheme } from '../context/ThemeContext';
 import { useLazyLoad, useDebouncedValue } from '../hooks/useLazyLoad';
+import { statusColors, statusLabels, getMemoryColor } from '../constants/colors';
 
 // Lazy load chart components
 const TrendChart = lazy(() => import('./TrendChart').then(m => ({ default: m.TrendChart })));
@@ -16,36 +17,12 @@ interface TargetCardProps {
   renderIndex?: number;
 }
 
-const statusColors: Record<string, { bg: string; text: string; border: string }> = {
-  healthy: { bg: '#dcfce7', text: '#166534', border: '#22c55e' },
-  running: { bg: '#dcfce7', text: '#166534', border: '#22c55e' },
-  warning: { bg: '#fef3c7', text: '#92400e', border: '#f59e0b' },
-  critical: { bg: '#fee2e2', text: '#991b1b', border: '#ef4444' },
-  unknown: { bg: '#f3f4f6', text: '#374151', border: '#9ca3af' },
-  offline: { bg: '#fef2f2', text: '#7f1d1d', border: '#991b1b' },
-};
-
-const statusLabels: Record<string, string> = {
-  healthy: 'RUNNING',
-  running: 'RUNNING',
-  warning: 'WARNING',
-  critical: 'CRITICAL',
-  unknown: 'UNKNOWN',
-  offline: 'OFFLINE',
-};
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
-function getMemoryColor(ratio: number): string {
-  if (ratio >= 0.9) return '#ef4444';
-  if (ratio >= 0.75) return '#f59e0b';
-  return '#22c55e';
 }
 
 function getCpuColor(usage: number): string {
