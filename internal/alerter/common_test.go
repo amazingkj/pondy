@@ -77,8 +77,8 @@ func TestGetSlackColor(t *testing.T) {
 	}{
 		{"critical", "danger"},
 		{"warning", "warning"},
-		{"info", "#3498DB"},
-		{"unknown", "#3498DB"},
+		{"info", "good"},
+		{"unknown", ColorInfo},
 	}
 
 	for _, tt := range tests {
