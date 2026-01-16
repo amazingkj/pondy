@@ -1,6 +1,7 @@
 # Claude
 .claude
 pondy-proposal*
+tmpclaude-*-cwd
 
 # Go
 pondy
